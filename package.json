@@ -1,0 +1,29 @@
+{
+  "name": "modegrammar",
+  "version": "0.0.1",
+  "description": "Experimental approach to CodeMirror modes",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "mocha test/test-*.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/marijnh/modegrammar/"
+  },
+  "keywords": [
+    "syntax",
+    "highlighting",
+    "editor",
+    "codemirror",
+    "mode",
+    "grammar",
+    "parser",
+    "peg",
+    "packrat"
+  ],
+  "author": "Marijn Haverbeke <marijnh@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "acorn": "^5.0.3"
+  }
+}
