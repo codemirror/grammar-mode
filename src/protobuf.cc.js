@@ -10,63 +10,69 @@ const F = {F: true}, C = {C: true}
 
 class Matcher {
   constructor(input) {
-    this._pos = 0
-    this._input = input
-    this._stack = []
-    this._callee = null
+    this.pos = 0
+    this.input = input
+    this.stack = []
+    this.callee = null
   }
 
-  _re(re) {
-    let match = re.exec(this._input.slice(this._pos))
-    if (match) this._pos += match[0].length
+  re(re) {
+    let match = re.exec(this.input.slice(this.pos))
+    if (match) this.pos += match[0].length
     return match || F
   }
 
-  _str(string) {
-    if (this._input.slice(this._pos, this._pos + string.length) == string)
-      this._pos += string.length
+  str(string) {
+    if (this.input.slice(this.pos, this.pos + string.length) == string)
+      this.pos += string.length
     else
       return F
   }
 
   eof() {
-    return this._pos == this._input.length ? null : F
+    return this.pos == this.input.length ? null : F
   }
 
-  _backtrack(pos) {
-    this._pos = pos
+  backtrack(pos) {
+    this.pos = pos
   }
 
-  _group(str) {
-    if (this._pos < this._input.length && str.indexOf(this._input[this._pos]) > -1)
-      this._pos++
+  group(str) {
+    if (this.pos < this.input.length && str.indexOf(this.input[this.pos]) > -1)
+      this.pos++
     else
       return F
   }
 
-  _call(callee, onSucc, onFail) {
-    this._stack.push(onSucc, onFail)
-    this._callee = callee
+  call(rule, success, failure) {
+    this.stack.push(success, failure)
+    this.callee = rule
     return C
   }
 
-  _exec(rule) {
-    this._stack.length = 0
+  callWith(rule, arg, success, failure) {
+    this.stack.push(success, failure, arg)
+    this.callee = rule
+    return C
+  }
+
+  exec(rule) {
+    this.stack.length = 0
     for (let next = rule, arg = null;;) {
-      let result = next.call(this, arg)
-      console.log("call @", this._pos, next.name || next.toString().slice(0, 15), "=>", result == C ? "call " + (this._callee.name || this._callee.toString().slice(0, 15)) : result)
+      let result = next(this, arg)
+      console.log("call @", this.pos, next.name || next.toString().slice(0, 15), "=>", result == C ? "call " + (this.callee.name || this.callee.toString().slice(0, 15)) : result)
       if (result == F) {
-        if (this._stack.length == 0) return F
-        next = this._stack.pop()
-        this._stack.pop()
+        if (this.stack.length == 0) return F
+        next = this.stack.pop()
+        this.stack.pop()
         arg = null
       } else if (result == C) {
-        next = this._callee
+        next = this.callee
         arg = null
       } else {
-        if (this._stack.length == 0) return result
-        this._stack.pop()
-        next = this._stack.pop()
+        if (this.stack.length == 0) return result
+        this.stack.pop()
+        next = this.stack.pop()
         arg = result
       }
     }
@@ -79,122 +85,135 @@ function fail_0() {
   return F
 }
 
-function succeed_0(v) {
+function fail_1(m) {
+  m.stack.pop()
+  return F
+}
+
+function succeed_0(_, v) {
   return v
 }
 
-function succeed_1(v) {
-  this._stack.pop()
+function succeed_1(m, v) {
+  m.stack.pop()
   return v
 }
 
-class ProtobufMatcher extends Matcher {
-  Program() {
-    while (this._group(space) != F) {}
-    return this.Program_1()
-  }
-
-  Program_1() {
-    if (this.eof() != F) return
-    return this._call(this.Statement, this.Program_1, fail_0)
-  }
-
-  Statement() {
-    this._stack.push(this._pos)
-    return this._call(function() { return this.kw("package"); }, this.Statement_package_1, this.Statement_message)
-  }
-
-  Statement_package_1() {
-    return this._call(this.identifier, this.Statement_package_2, this.Statement_message)
-  }
-
-  Statement_package_2() {
-    return this._call(function() { return this.p(";") }, succeed_1, this.Statement_message)
-  }
-
-  Statement_message() {
-    this._backtrack(this._stack.pop())
-    return this._call(function() { return this.kw("message"); }, this.Statement_message_1, fail_0)
-  }
-
-  Statement_message_1() {
-    return this._call(this.identifier, this.Statement_message_2, fail_0)
-  }
-
-  Statement_message_2() {
-    return this._call(function() { return this.p("{") }, this.Statement_message_3, fail_0)
-  }
-
-  Statement_message_3() {
-    return this._call(function() { return this.p("}") }, succeed_0, this.Statement_message_4)
-  }
-
-  Statement_message_4() {
-    return this._call(this.Field, this.Statement_message_3, fail_0)
-  }
-
-  Field() {
-    this._stack.push(this._pos)
-    return this._call(this.modifier, this.Field_1, this.Field_2)
-  }
-
-  Field_1() {
-    this._stack.pop()
-    return this.Field()
-  }
-
-  Field_2() {
-    this._backtrack(this._stack.pop())
-    return this._call(this.type, this.Field_3, fail_0)
-  }
-
-  Field_3() {
-    return this._call(this.identifier, this.Field_4, fail_0)
-  }
-
-  Field_4() {
-    return this._call(function() { return this.p("=") }, this.Field_5, fail_0)
-  }
-
-  Field_5() {
-    return this._call(this.number, this.Field_6, fail_0)
-  }
-
-  Field_6() {
-    return this._call(function() { return this.p(";") }, succeed_0, fail_0)
-  }
-
-  identifier() {
-    let r = this._re(/\w+/)
-    if (!r) return F
-    let value = r[0]
-    while (this._group(space) != F) {}
-    return value
-  }
-
-  kw(value) {
-    return this._call(this.identifier, function(val) { if (val != value) return F }, fail_0)
-  }
-
-  type() {
-    return this._call(this.identifier, function(val) { if (types.indexOf(val) == -1) return F }, fail_0)
-  }
-
-  modifier() {
-    return this._call(this.identifier, function(val) { if (modifiers.indexOf(val) == -1) return F }, fail_0)
-  }
-
-  p(value) {
-    if (this._str(value) == F) return F
-    while (this._group(space) != F) {}
-  }
-
-  number() {
-    if (!this._re(/\d+/)) return F
-    while (this._group(space) != F) {}
-  }
+function Program(m) {
+  while (m.group(space) != F) {}
+  return Program_1(m)
 }
 
+function Program_1(m) {
+  return m.eof() == F ? m.call(Statement, Program_1, fail_0) : null
+}
 
-let m = new ProtobufMatcher("package foo;\n\nmessage Address {\n  required string foo = 1;\n  optional int32 bar = 2;\n}\n")
-console.log(m._exec(m.Program))
+function Statement(m) {
+  m.stack.push(m.pos)
+  return m.callWith(kw, "package", Statement_package_1, Statement_message)
+}
+
+function Statement_package_1(m) {
+  return m.call(identifier, Statement_package_2, Statement_message)
+}
+
+function Statement_package_2(m) {
+  return m.callWith(p, ";", succeed_1, Statement_message)
+}
+
+function Statement_message(m) {
+  m.backtrack(m.stack.pop())
+  return m.callWith(kw, "message", Statement_message_1, fail_0)
+}
+
+function Statement_message_1(m) {
+  return m.call(identifier, Statement_message_2, fail_0)
+}
+
+function Statement_message_2(m) {
+  return m.callWith(p, "{", Statement_message_3, fail_0)
+}
+
+function Statement_message_3(m) {
+  return m.callWith(p, "}", succeed_0, Statement_message_4)
+}
+
+function Statement_message_4(m) {
+  return m.call(Field, Statement_message_3, fail_0)
+}
+
+function Field(m) {
+  m.stack.push(m.pos)
+  return m.call(modifier, Field_1, Field_2)
+}
+
+function Field_1(m) {
+  m.stack.pop()
+  return Field(m)
+}
+
+function Field_2(m) {
+  m.backtrack(m.stack.pop())
+  return m.call(type, Field_3, fail_0)
+}
+
+function Field_3(m) {
+  return m.call(identifier, Field_4, fail_0)
+}
+
+function Field_4(m) {
+  return m.callWith(p, "=", Field_5, fail_0)
+}
+
+function Field_5(m) {
+  return m.call(number, Field_6, fail_0)
+}
+
+function Field_6(m) {
+  return m.callWith(p, ";", succeed_0, fail_0)
+}
+
+function identifier(m) {
+  let r = m.re(/\w+/)
+  if (!r) return F
+  let value = r[0]
+  while (m.group(space) != F) {}
+  return value
+}
+
+function kw(m) {
+  return m.call(identifier, kw2, fail_1)
+}
+
+function kw2(m, ident) {
+  return m.stack.pop() == ident ? null : F
+}
+
+function type(m) {
+  return m.call(identifier, type2, fail_0)
+}
+
+function type2(_, ident) {
+  return types.indexOf(ident) > -1 ? null : F
+}
+
+function modifier() {
+  return m.call(identifier, modifier2, fail_0)
+}
+
+function modifier2(_, ident) {
+  return modifiers.indexOf(ident) > -1 ? null : F
+}
+
+function p(m) {
+  if (m.str(m.stack.pop()) == F) return F
+  while (m.group(space) != F) {}
+}
+
+function number(m) {
+  if (!m.re(/\d+/)) return F
+  while (m.group(space) != F) {}
+}
+
+let m = new Matcher("package foo;\n\nmessage Address {\n  required string foo = 1;\n  optional int32 bar = 2;\n}\n")
+console.log(m.exec(Program))
