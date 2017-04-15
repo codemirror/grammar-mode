@@ -3,7 +3,7 @@ const keywords = ("if while with else do try finally return break continue new d
                   "true false this class super yield export import extends await async").split(" ")
 
 grammar JavaScript {
-  Program { Statement* space* eof }
+  Program { Statement ! eof }
   
   Statement {
     kw["if"] p["("] Expression p[")"]  Statement (kw["else"] Statement)? |
@@ -17,8 +17,9 @@ grammar JavaScript {
   BlockStatement {
     p["{"] Statement* p["}"]
   }
-  
+
   PrimaryExpression {
+    ArrowExpression |
     identifier |
     p["("] Expression p[")"] |
     kw["this"] | kw["true"] | kw["false"] | kw["null"] |
@@ -28,6 +29,11 @@ grammar JavaScript {
     kw["function"] definedIdentifier? p["("] (definedIdentifier p[","]?) ! p[")"] BlockStatement |
     (kw["new"] | kw["await"] | kw["yield"]) Expression |
     op[null] Expression
+  }
+
+  ArrowExpression {
+    identifier op("=>") ArrowBody
+    p["("] (Parameter p[","]?) ! p[")"] op["=>"] ArrowBody
   }
 
   Expression {

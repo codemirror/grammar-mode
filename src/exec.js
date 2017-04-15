@@ -38,11 +38,12 @@ function run(expr, pos, env) {
       if (val == F) return F
     }
   } else if (t == "choice") {
-    for (let i = 0; i < expr.choices.length; i++) {
+    let last = expr.choices.length - 1
+    for (let i = 0; i < last; i++) {
       let val = maybeRun(expr.choices[i], pos, env)
       if (val != F) return val
     }
-    return F
+    return run(expr.choices[last], pos, env)
   } else if (t == "string") {
     let end = pos.pos + expr.value.length
     if (pos.input.slice(pos.pos, end) != expr.value) return F
