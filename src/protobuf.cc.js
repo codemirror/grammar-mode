@@ -7,7 +7,7 @@ var types = [
 ];
 
 class Rule {
-  constructor(name, code, isToken) {
+  constructor(name, code, isToken = false) {
     this.name = name
     this.code = code
     this.isToken = isToken
@@ -189,7 +189,7 @@ function Field_6(m) {
 const identifier = new Rule("identifier", identifier_0, true)
 
 function identifier_0(m) {
-  let r = m.re(/\w+/)
+  let r = m.re(/^[a-z]\w*/i)
   if (!r) return F
   let value = r[0]
   while (m.group(space) != F) {}
@@ -236,9 +236,71 @@ function p_0(m) {
 const number = new Rule("number", number_0, true)
 
 function number_0(m) {
-  if (!m.re(/\d+/)) return F
+  if (!m.re(/^\d+/)) return F
   while (m.group(space) != F) {}
 }
 
-let m = new Matcher("package foo;\n\nmessage Address {\n  required string foo = 1;\n  optional int32 bar = 2;\n}\n")
-console.log(m.exec(Program))
+class Match {
+  constructor(name, start, end, value) {
+    this.name = name
+    this.start = start
+    this.end = end
+    this.value = value
+  }
+}
+
+class ModeMatcher extends Matcher {
+  constructor(input) {
+    super(input)
+    this.cache = []
+    this.frontier = 0
+  }
+
+  call(rule, success, failure) {
+    this.stack.push(rule, this.pos, success, failure)
+    this.callee = rule
+    return C
+  }
+
+  callWith(rule, arg, success, failure) {
+    this.stack.push(rule, this.pos, success, failure, arg)
+    this.callee = rule
+    return C
+  }
+
+  exec(startRule, upto) {
+    let result = C
+    this.callee = startRule
+    cc: for (;;) {
+      if (result == C) {
+        let cached = this.cache[this.pos]
+        if (cached) for (let i = 0; i < cached.length; i++) {
+          if (cached[i].name == this.callee.name) {
+            this.pos = cached[i].end
+            let _f = this.stack.pop(), onSucc = this.stack.pop(), _start = this.stack.pop(), _rule = this.stack.pop()
+            result = onSucc(this, cached[i].value)
+            continue cc
+          }
+        }
+        result = this.callee.code(this)
+      } else if (this.stack.length == 0) { // FIXME fall back to tokenizing
+        if (this.pos >= upto) return
+        result = C
+        this.callee = startRule
+      } else {
+        let onFail = this.stack.pop(), onSucc = this.stack.pop(), start = this.stack.pop(), rule = this.stack.pop()
+        if (result == F) {
+          result = onFail(this)
+        } else {
+          if (this.pos > upto) return
+          ;(this.cache[start] || (this.cache[start] = [])).push(new Match(rule.name, start, this.pos, result))
+          result = onSucc(this, result)
+        }
+      }
+    }
+  }
+}
+
+let m = new ModeMatcher("package foo;\n\nmessage Address {\n  required string foo = 1;\n  optional int32 bar = 2;\n}\n")
+m.exec(Program, m.input.length)
+console.log(m.cache)
