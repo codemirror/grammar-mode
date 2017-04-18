@@ -124,7 +124,7 @@ function Program_1(m) {
 const Statement = new Rule("Statement", Statement_0)
 
 function Statement_0(m) {
-  m.stack.push(m.pos)
+  m.stack[m.stack.length] = m.pos
   return m.callWith(kw, "package", Statement_package_1, Statement_message)
 }
 
@@ -160,7 +160,7 @@ function Statement_message_4(m) {
 const Field = new Rule("Field", Field_0)
 
 function Field_0(m) {
-  m.stack.push(m.pos)
+  m.stack[m.stack.length] = m.pos
   return m.call(modifier, Field_1, Field_2)
 }
 
@@ -284,8 +284,9 @@ class ModeMatcher extends Matcher {
       }
       this.currentMatch = match = new Match(rule, argVal, this.pos, this.currentMatch)
     }
-    this.stack.push(match, success, failure)
-    if (arg != F) this.stack.push(arg)
+    let s = this.stack, l = s.length
+    s[l++] = match; s[l++] = success; s[l++] = failure
+    if (arg != F) s[l++] = arg
     this.callee = rule
     return C
   }
