@@ -12,6 +12,10 @@ class Rule {
     this.code = code
     this.isToken = isToken
   }
+
+  get cached() {
+    return this.isToken
+  }
 }
 
 const F = {F: true}, C = {C: true}
@@ -241,11 +245,13 @@ function number_0(m) {
 }
 
 class Match {
-  constructor(name, start, end, value) {
-    this.name = name
+  constructor(rule, arg, start, parent) {
+    this.rule = rule
+    this.arg = arg
     this.start = start
-    this.end = end
-    this.value = value
+    this.parent = parent
+    this.end = -1
+    this.value = null
   }
 }
 
@@ -253,17 +259,33 @@ class ModeMatcher extends Matcher {
   constructor(input) {
     super(input)
     this.cache = []
-    this.frontier = 0
+    this.currentMatch = null
+  }
+
+  isCached(rule, arg) {
+    let cached = this.cache[this.pos]
+    if (cached) for (let i = 0; i < cached.length; i++)
+      if (cached[i].rule === rule && cached[i].arg === arg) return cached[i]
   }
 
   call(rule, success, failure) {
-    this.stack.push(rule, this.pos, success, failure)
-    this.callee = rule
-    return C
+    return this.callWith(rule, F, success, failure)
   }
 
   callWith(rule, arg, success, failure) {
-    this.stack.push(rule, this.pos, success, failure, arg)
+    let match
+    if (rule.cached) {
+      let argVal = arg == F ? null : arg
+      let cached = this.isCached(rule, argVal)
+      if (cached) {
+        cached.parent = this.currentMatch
+        this.pos = cached.end
+        return success(this, cached.value)
+      }
+      this.currentMatch = match = new Match(rule, argVal, this.pos, this.currentMatch)
+    }
+    this.stack.push(match, success, failure)
+    if (arg != F) this.stack.push(arg)
     this.callee = rule
     return C
   }
@@ -271,29 +293,27 @@ class ModeMatcher extends Matcher {
   exec(startRule, upto) {
     let result = C
     this.callee = startRule
-    cc: for (;;) {
+    for (;;) {
       if (result == C) {
-        let cached = this.cache[this.pos]
-        if (cached) for (let i = 0; i < cached.length; i++) {
-          if (cached[i].name == this.callee.name) {
-            this.pos = cached[i].end
-            let _f = this.stack.pop(), onSucc = this.stack.pop(), _start = this.stack.pop(), _rule = this.stack.pop()
-            result = onSucc(this, cached[i].value)
-            continue cc
-          }
-        }
         result = this.callee.code(this)
       } else if (this.stack.length == 0) { // FIXME fall back to tokenizing
         if (this.pos >= upto) return
         result = C
         this.callee = startRule
       } else {
-        let onFail = this.stack.pop(), onSucc = this.stack.pop(), start = this.stack.pop(), rule = this.stack.pop()
+        let onFail = this.stack.pop(), onSucc = this.stack.pop(), match = this.stack.pop()
+        if (match) {
+          this.currentMatch = match.parent
+          if (result != F) {
+            match.end = this.pos
+            match.value = result
+            ;(this.cache[match.start] || (this.cache[match.start] = [])).push(match)
+          }
+        }
         if (result == F) {
           result = onFail(this)
         } else {
           if (this.pos > upto) return
-          ;(this.cache[start] || (this.cache[start] = [])).push(new Match(rule.name, start, this.pos, result))
           result = onSucc(this, result)
         }
       }
