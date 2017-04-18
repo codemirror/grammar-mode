@@ -6,6 +6,14 @@ var types = [
   "int32", "int64", "uint32", "uint64", "sint32", "sint64", "fixed32", "fixed64", "sfixed32", "sfixed64"
 ];
 
+class Rule {
+  constructor(name, code, isToken) {
+    this.name = name
+    this.code = code
+    this.isToken = isToken
+  }
+}
+
 const F = {F: true}, C = {C: true}
 
 class Matcher {
@@ -58,16 +66,15 @@ class Matcher {
 
   exec(rule) {
     this.stack.length = 0
-    for (let next = rule, arg = null;;) {
+    for (let next = rule.code, arg = null;;) {
       let result = next(this, arg)
-      console.log("call @", this.pos, next.name || next.toString().slice(0, 15), "=>", result == C ? "call " + (this.callee.name || this.callee.toString().slice(0, 15)) : result)
       if (result == F) {
         if (this.stack.length == 0) return F
         next = this.stack.pop()
         this.stack.pop()
         arg = null
       } else if (result == C) {
-        next = this.callee
+        next = this.callee.code
         arg = null
       } else {
         if (this.stack.length == 0) return result
@@ -99,7 +106,9 @@ function succeed_1(m, v) {
   return v
 }
 
-function Program(m) {
+const Program = new Rule("Program", Program_0)
+
+function Program_0(m) {
   while (m.group(space) != F) {}
   return Program_1(m)
 }
@@ -108,7 +117,9 @@ function Program_1(m) {
   return m.eof() == F ? m.call(Statement, Program_1, fail_0) : null
 }
 
-function Statement(m) {
+const Statement = new Rule("Statement", Statement_0)
+
+function Statement_0(m) {
   m.stack.push(m.pos)
   return m.callWith(kw, "package", Statement_package_1, Statement_message)
 }
@@ -142,14 +153,16 @@ function Statement_message_4(m) {
   return m.call(Field, Statement_message_3, fail_0)
 }
 
-function Field(m) {
+const Field = new Rule("Field", Field_0)
+
+function Field_0(m) {
   m.stack.push(m.pos)
   return m.call(modifier, Field_1, Field_2)
 }
 
 function Field_1(m) {
   m.stack.pop()
-  return Field(m)
+  return Field_0(m)
 }
 
 function Field_2(m) {
@@ -173,7 +186,9 @@ function Field_6(m) {
   return m.callWith(p, ";", succeed_0, fail_0)
 }
 
-function identifier(m) {
+const identifier = new Rule("identifier", identifier_0, true)
+
+function identifier_0(m) {
   let r = m.re(/\w+/)
   if (!r) return F
   let value = r[0]
@@ -181,36 +196,46 @@ function identifier(m) {
   return value
 }
 
-function kw(m) {
-  return m.call(identifier, kw2, fail_1)
+const kw = new Rule("kw", kw_0, true)
+
+function kw_0(m) {
+  return m.call(identifier, kw_1, fail_1)
 }
 
-function kw2(m, ident) {
+function kw_1(m, ident) {
   return m.stack.pop() == ident ? null : F
 }
 
-function type(m) {
-  return m.call(identifier, type2, fail_0)
+const type = new Rule("type", type_0, true)
+
+function type_0(m) {
+  return m.call(identifier, type_1, fail_0)
 }
 
-function type2(_, ident) {
+function type_1(_, ident) {
   return types.indexOf(ident) > -1 ? null : F
 }
 
-function modifier() {
-  return m.call(identifier, modifier2, fail_0)
+const modifier = new Rule("modifier", modifier_0, true)
+
+function modifier_0() {
+  return m.call(identifier, modifier_1, fail_0)
 }
 
-function modifier2(_, ident) {
+function modifier_1(_, ident) {
   return modifiers.indexOf(ident) > -1 ? null : F
 }
 
-function p(m) {
+const p = new Rule("p", p_0, true)
+
+function p_0(m) {
   if (m.str(m.stack.pop()) == F) return F
   while (m.group(space) != F) {}
 }
 
-function number(m) {
+const number = new Rule("number", number_0, true)
+
+function number_0(m) {
   if (!m.re(/\d+/)) return F
   while (m.group(space) != F) {}
 }
