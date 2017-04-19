@@ -39,7 +39,17 @@ function Program_0(m) {
 }
 
 function Program_1(m) {
-  return m.eof() == F ? m.call(Statement, Program_1) : null
+  m.setBacktrack(Program_3, Program_1)
+  return m.call(Statement, Program_2)
+}
+
+function Program_2(m) {
+  m.backtrackStack.pop()
+  return Program_1(m)
+}
+
+function Program_3(m) {
+  return m.eof()
 }
 
 const Statement = new Rule("Statement", Statement_0)
@@ -70,18 +80,23 @@ function Statement_message_2(m) {
 }
 
 function Statement_message_3(m) {
-  m.setBacktrack(Statement_message_4)
-  return m.callWith(p, "}", succeed_drop)
+  m.setBacktrack(Statement_message_5, Statement_message_3)
+  return m.call(Field, Statement_message_4)
 }
 
 function Statement_message_4(m) {
-  return m.call(Field, Statement_message_3)
+  m.backtrackStack.pop()
+  return Statement_message_3(m)
+}
+
+function Statement_message_5(m) {
+  return m.callWith(p, "}", succeed)
 }
 
 const Field = new Rule("Field", Field_0)
 
 function Field_0(m) {
-  m.setBacktrack(Field_2)
+  m.setBacktrack(Field_2, Field_0)
   return m.call(modifier, Field_1)
 }
 
@@ -114,7 +129,7 @@ const identifier = new Rule("identifier", identifier_0, true)
 
 function identifier_0(m) {
   let r = m.re(/^[a-z]\w*/i)
-  if (!r) return F
+  if (r == F) return F
   let value = r[0]
   while (m.group(space) != F) {}
   return value
@@ -160,8 +175,29 @@ function p_0(m) {
 const number = new Rule("number", number_0, true)
 
 function number_0(m) {
-  if (!m.re(/^\d+/)) return F
+  if (m.re(/^\d+/) == F) return F
   while (m.group(space) != F) {}
+}
+
+const anyToken = new Rule("anyToken", anyToken_0)
+
+function anyToken_0(m) {
+  m.setBacktrack(anyToken_1)
+  return m.call(number, succeed_drop)
+}
+
+function anyToken_1(m) {
+  m.setBacktrack(anyToken_2)
+  return m.call(identifier, succeed_drop)
+}
+
+function anyToken_2(m) {
+  m.any()
+  while (m.group(space) != F) {}
+}
+
+function anyTokens(m) {
+  if (m.eof() == F) return m.call(anyToken, anyTokens)
 }
 
 class Match {
@@ -184,11 +220,12 @@ class Frame {
 }
 
 class BacktrackFrame {
-  constructor(pos, isLookahead, frameDepth, next) {
+  constructor(pos, isLookahead, frameDepth, next, recover) {
     this.pos = pos
     this.isLookahead = isLookahead
     this.frameDepth = frameDepth
     this.next = next
+    this.recover = recover
   }
 }
 
@@ -204,8 +241,10 @@ class ModeMatcher {
     this.backtrackStack = []
     this.callee = null
     this.cache = []
-    this.frontierState = null
+    this.frontierStack = null
+    this.frontierBacktrack = null
     this.frontierPos = -1
+    this.skipping = false
   }
 
   get currentMatch() {
@@ -236,8 +275,13 @@ class ModeMatcher {
     return this.pos == this.input.length ? null : F
   }
 
-  setBacktrack(next, lookahead) {
-    this.backtrackStack.push(new BacktrackFrame(this.pos, lookahead, this.stack.length, next))
+  any() {
+    if (this.pos == this.input.length) return F
+    this.pos++
+  }
+
+  setBacktrack(next, recover, lookahead) {
+    this.backtrackStack.push(new BacktrackFrame(this.pos, lookahead, this.stack.length, next, recover))
   }
 
   group(str) {
@@ -258,7 +302,6 @@ class ModeMatcher {
   }
 
   callWith(rule, arg, next) {
-    console.log("CALL", rule.name, "with", arg, "@", this.pos)
     let match
     if (rule.cached) {
       let argVal = arg == F ? null : arg
@@ -284,16 +327,37 @@ class ModeMatcher {
       } else if (result === F) {
         let backtrack = this.backtrackStack.pop()
         if (backtrack) {
-          if (!backtrack.isLookahead && this.pos > this.frontierPos &&
+          if (!this.skipping &&
+              !backtrack.isLookahead && this.pos > this.frontierPos &&
               this.pos > backtrack.pos + MIN_SAVE_DISTANCE) {
-            this.frontierState = this.stack.slice()
+            this.frontierStack = this.stack.slice()
+            this.frontierBacktrack = this.backtrackStack.concat(backtrack)
             this.frontierPos = this.pos
           }
           this.pos = backtrack.pos
           this.stack.length = backtrack.frameDepth
           result = backtrack.next(this)
+        } else if (!this.frontierStack) {
+          result = anyTokens(this)
         } else {
-          console.log("FIXME nothing to track back to")
+          if (this.pos >= upto) return
+          this.stack = this.frontierStack.slice()
+          this.pos = this.frontierPos
+          this.skipping = true
+          result = this.call(anyToken, m => {
+            m.skipping = false
+            m.backtrackStack = m.frontierBacktrack.slice()
+            m.frontierPos = this.pos
+            for (let i = 0; i < m.backtrackStack.length; i++) {
+              let bt = m.backtrackStack[i]
+              bt.pos = m.pos
+              if (bt.recover) {
+                m.backtrackStack.splice(++i, 0, new BacktrackFrame(m.pos, false, bt.frameDepth, bt.recover))
+                bt.recover = null
+              }
+            }
+            return F
+          })
         }
       } else if (this.stack.length == 0) {
         if (this.pos >= upto) return
@@ -313,6 +377,5 @@ class ModeMatcher {
   }
 }
 
-let m = new ModeMatcher("package foo;\n\nmessage Address {\n  required string foo = 1;\n  optional int32 bar = 2;\n}\n")
+let m = new ModeMatcher("package foo;\n\nmessage Address {\n  required string foo = 1-\n  optional int32 bar = 2;\n}\n")
 m.exec(Program, m.input.length)
-console.log(m.cache)
