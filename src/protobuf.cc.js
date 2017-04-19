@@ -229,7 +229,7 @@ class BacktrackFrame {
   }
 }
 
-const MIN_SAVE_DISTANCE = 15
+const MIN_SAVE_DISTANCE = 15, MAX_BACKTRACK_DISTANCE = 100
 
 class ModeMatcher {
   constructor(input) {
@@ -325,7 +325,10 @@ class ModeMatcher {
       if (result === C) {
         result = this.callee.code(this)
       } else if (result === F) {
-        let backtrack = this.backtrackStack.pop()
+        let backtrack
+        do {
+          backtrack = this.backtrackStack.pop()
+        } while (backtrack && backtrack.pos < this.pos - MAX_BACKTRACK_DISTANCE)
         if (backtrack) {
           if (!this.skipping &&
               !backtrack.isLookahead && this.pos > this.frontierPos &&
