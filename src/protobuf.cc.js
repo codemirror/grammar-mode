@@ -192,6 +192,8 @@ class BacktrackFrame {
   }
 }
 
+const MIN_SAVE_DISTANCE = 15
+
 class ModeMatcher {
   constructor(input) {
     this.pos = 0
@@ -272,22 +274,6 @@ class ModeMatcher {
     this.callee = rule
     return C
   }
-/*
-  maybePreserveFrontier() {
-    if (this.pos <= this.frontierPos) return
-    let last = this.backtrackStack[this.backtrackStack.length - 1]
-    if (last < 0 || last >= this.pos - MIN_SAVE_DISTANCE) return
-    console.log("storing frontier @", this.pos)
-    this.frontierState = this.stack.slice()
-    this.frontierPos = this.pos
-  }
-
-  restoreFrontier() {
-    console.log("restore frontier from", this.pos, "to", this.frontierPos)
-    this.state = this.frontierState
-    this.pos = this.frontierPos
-    // FIXME more state mangling?
-  }*/
 
   exec(startRule, upto) {
     let result = C
@@ -297,10 +283,18 @@ class ModeMatcher {
         result = this.callee.code(this)
       } else if (result === F) {
         let backtrack = this.backtrackStack.pop()
-        // FIXME may be null
-        this.pos = backtrack.pos
-        this.stack.length = backtrack.frameDepth
-        result = backtrack.next(this)
+        if (backtrack) {
+          if (!backtrack.isLookahead && this.pos > this.frontierPos &&
+              this.pos > backtrack.pos + MIN_SAVE_DISTANCE) {
+            this.frontierState = this.stack.slice()
+            this.frontierPos = this.pos
+          }
+          this.pos = backtrack.pos
+          this.stack.length = backtrack.frameDepth
+          result = backtrack.next(this)
+        } else {
+          console.log("FIXME nothing to track back to")
+        }
       } else if (this.stack.length == 0) {
         if (this.pos >= upto) return
         this.callee = startRule
