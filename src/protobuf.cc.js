@@ -1,3 +1,12 @@
+// TODO:
+//
+// - Token extraction
+// - CodeMirror integration
+// - Compiler
+// - More efficient sliding cache data structure
+// - Don't make whitespace part of tokens or rules
+// - Reconsider rule return values and conditions
+
 var modifiers = [
   "required", "optional", "repeated", "reserved", "default", "extensions", "packed"
 ]
@@ -7,14 +16,14 @@ var types = [
 ];
 
 class Rule {
-  constructor(name, code, isToken = false) {
+  constructor(name, code, tokenType = null) {
     this.name = name
     this.code = code
-    this.isToken = isToken
+    this.tokenType = tokenType
   }
 
   get cached() {
-    return this.isToken
+    return this.tokenType != null
   }
 }
 
@@ -125,7 +134,7 @@ function Field_6(m) {
   return m.callWith(p, ";", succeed)
 }
 
-const identifier = new Rule("identifier", identifier_0, true)
+const identifier = new Rule("identifier", identifier_0, "variable")
 
 function identifier_0(m) {
   let r = m.re(/^[a-z]\w*/i)
@@ -135,7 +144,7 @@ function identifier_0(m) {
   return value
 }
 
-const kw = new Rule("kw", kw_0, true)
+const kw = new Rule("kw", kw_0, "keyword")
 
 function kw_0(m) {
   return m.call(identifier, kw_1)
@@ -145,7 +154,7 @@ function kw_1(m, ident) {
   return m.arg == ident ? null : F
 }
 
-const type = new Rule("type", type_0, true)
+const type = new Rule("type", type_0, "variable-2")
 
 function type_0(m) {
   return m.call(identifier, type_1)
@@ -155,7 +164,7 @@ function type_1(_, ident) {
   return types.indexOf(ident) > -1 ? null : F
 }
 
-const modifier = new Rule("modifier", modifier_0, true)
+const modifier = new Rule("modifier", modifier_0, "keyword")
 
 function modifier_0() {
   return m.call(identifier, modifier_1)
@@ -165,14 +174,14 @@ function modifier_1(_, ident) {
   return modifiers.indexOf(ident) > -1 ? null : F
 }
 
-const p = new Rule("p", p_0, true)
+const p = new Rule("p", p_0)
 
 function p_0(m) {
   if (m.str(m.arg) == F) return F
   while (m.group(space) != F) {}
 }
 
-const number = new Rule("number", number_0, true)
+const number = new Rule("number", number_0, "number")
 
 function number_0(m) {
   if (m.re(/^\d+/) == F) return F
@@ -294,7 +303,12 @@ class ModeMatcher {
   getMatch(rule, arg) {
     let cached = this.cache[this.pos]
     if (cached) for (let i = 0; i < cached.length; i++)
-      if (cached[i].rule === rule && cached[i].arg === arg) return cached[i]
+      if (cached[i].rule === rule && cached[i].arg === arg) {
+        // Move this rule to the front so that it gets picked up by
+        // the token gathering method
+        if (i) { let tmp = cached[i]; cached[i] = cached[0]; cached[0] = tmp }
+        return cached[i]
+      }
   }
 
   call(rule, next) {
@@ -318,7 +332,7 @@ class ModeMatcher {
     return C
   }
 
-  exec(startRule, upto) {
+  exec(startRule, onAdvance) {
     let result = C
     this.callee = startRule
     for (;;) {
@@ -343,7 +357,7 @@ class ModeMatcher {
         } else if (!this.frontierStack) {
           result = anyTokens(this)
         } else {
-          if (this.pos >= upto) return
+          if (onAdvance(this) === false) return
           this.stack = this.frontierStack.slice()
           this.pos = this.frontierPos
           this.skipping = true
@@ -363,11 +377,11 @@ class ModeMatcher {
           })
         }
       } else if (this.stack.length == 0) {
-        if (this.pos >= upto) return
+        if (onAdvance(this) === false) return
         this.callee = startRule
         result = C
       } else {
-        if (this.pos > upto) return
+        if (onAdvance(this) === false) return
         let frame = this.stack.pop(), match = frame.match
         if (match) {
           match.end = this.pos
@@ -378,7 +392,25 @@ class ModeMatcher {
       }
     }
   }
+
+  getTokens(from, to) {
+    let result = [], last = 0
+    for (let pos = from; pos < to; pos++) {
+      let cached = this.cache[pos]
+      if (cached) for (let i = 0; i < cached.length; i++) {
+        if (cached[i].rule.tokenType) {
+          if (pos > last) result.push(pos, null)
+          last = Math.min(to, cached[i].end)
+          result.push(last, cached[i].rule.tokenType)
+          pos = last - 1
+          break
+        }
+      }
+    }
+    if (last < to) result.push(to, null)
+    return result
+  }
 }
 
 let m = new ModeMatcher("package foo;\n\nmessage Address {\n  required string foo = 1-\n  optional int32 bar = 2;\n}\n")
-m.exec(Program, m.input.length)
+m.exec(Program, m => m.pos < m.input.length)
