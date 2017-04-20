@@ -3,7 +3,7 @@
 // - Token extraction
 // - CodeMirror integration
 // - Compiler
-// - More efficient sliding cache data structure
+// - Sliding cache/token array
 // - Don't make whitespace part of tokens or rules
 // - Reconsider rule return values and conditions
 
@@ -215,7 +215,6 @@ class Match {
     this.arg = arg
     this.start = start
     this.parent = parent
-    this.end = -1
     this.value = null
   }
 }
@@ -241,15 +240,16 @@ class BacktrackFrame {
 const MIN_SAVE_DISTANCE = 15, MAX_BACKTRACK_DISTANCE = 100
 
 class ModeMatcher {
-  constructor(input) {
-    this.pos = 0
+  constructor(input, start = 0) {
+    this.pos = start
     this.input = input
     // :: [Frame]
     this.stack = []
     // :: [BacktrackFrame]
     this.backtrackStack = []
     this.callee = null
-    this.cache = []
+    this.tokens = []
+    this.tokenPos = start
     this.frontierStack = null
     this.frontierBacktrack = null
     this.frontierPos = -1
@@ -300,17 +300,6 @@ class ModeMatcher {
       return F
   }
 
-  getMatch(rule, arg) {
-    let cached = this.cache[this.pos]
-    if (cached) for (let i = 0; i < cached.length; i++)
-      if (cached[i].rule === rule && cached[i].arg === arg) {
-        // Move this rule to the front so that it gets picked up by
-        // the token gathering method
-        if (i) { let tmp = cached[i]; cached[i] = cached[0]; cached[0] = tmp }
-        return cached[i]
-      }
-  }
-
   call(rule, next) {
     return this.callWith(rule, F, next)
   }
@@ -319,11 +308,13 @@ class ModeMatcher {
     let match
     if (rule.cached) {
       let argVal = arg == F ? null : arg
-      let cached = this.getMatch(rule, argVal)
-      if (cached) {
-        cached.parent = this.currentMatch
-        this.pos = cached.end
-        return next(this, cached.value)
+      for (let cached = this.tokens[this.tokenPos + 1]; cached; cached = cached.parent) {
+        if (cached.rule === rule && cached.start == this.pos && cached.arg === argVal) {
+          cached.parent = this.currentMatch
+          this.pos = this.tokens[this.tokenPos]
+          this.tokenPos += 2
+          return next(this, cached.value)
+        }
       }
       match = new Match(rule, argVal, this.pos, this.currentMatch)
     }
@@ -382,33 +373,20 @@ class ModeMatcher {
         result = C
       } else {
         if (onAdvance(this) === false) return
-        let frame = this.stack.pop(), match = frame.match
-        if (match) {
-          match.end = this.pos
-          match.value = result
-          ;(this.cache[match.start] || (this.cache[match.start] = [])).push(match)
+        if (this.tokenPos == 0 || this.tokens[this.tokenPos - 2] < this.pos) {
+          let cur = this.currentMatch
+          if (this.tokens[this.tokenPos - 1] == cur) {
+            this.tokens[this.tokenPos - 2] = this.pos
+          } else {
+            this.tokens[this.tokenPos++] = this.pos
+            this.tokens[this.tokenPos++] = this.currentMatch
+          }
         }
+        let frame = this.stack.pop()
+        if (frame.match) frame.match.value = result
         result = frame.next(this, result)
       }
     }
-  }
-
-  getTokens(from, to) {
-    let result = [], last = 0
-    for (let pos = from; pos < to; pos++) {
-      let cached = this.cache[pos]
-      if (cached) for (let i = 0; i < cached.length; i++) {
-        if (cached[i].rule.tokenType) {
-          if (pos > last) result.push(pos, null)
-          last = Math.min(to, cached[i].end)
-          result.push(last, cached[i].rule.tokenType)
-          pos = last - 1
-          break
-        }
-      }
-    }
-    if (last < to) result.push(to, null)
-    return result
   }
 }
 
