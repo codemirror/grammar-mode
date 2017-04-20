@@ -1,6 +1,5 @@
 // TODO:
 //
-// - Token extraction
 // - CodeMirror integration
 // - Compiler
 // - Sliding cache/token array
@@ -210,12 +209,12 @@ function anyTokens(m) {
 }
 
 class Match {
-  constructor(rule, arg, start, parent) {
+  constructor(rule, arg, line, ch, parent) {
     this.rule = rule
     this.arg = arg
-    this.start = start
+    this.line = line
+    this.ch = ch
     this.parent = parent
-    this.value = null
   }
 }
 
@@ -228,8 +227,9 @@ class Frame {
 }
 
 class BacktrackFrame {
-  constructor(pos, isLookahead, frameDepth, next, recover) {
-    this.pos = pos
+  constructor(line, ch, isLookahead, frameDepth, next, recover) {
+    this.line = line
+    this.ch = ch
     this.isLookahead = isLookahead
     this.frameDepth = frameDepth
     this.next = next
@@ -237,22 +237,23 @@ class BacktrackFrame {
   }
 }
 
-const MIN_SAVE_DISTANCE = 15, MAX_BACKTRACK_DISTANCE = 100
+const MIN_SAVE_DISTANCE = 15, MAX_BACKTRACK_LINES = 10
 
 class ModeMatcher {
-  constructor(input, start = 0) {
-    this.pos = start
-    this.input = input
+  constructor(getLine, startLine = 0, startCh = 0) {
+    this.line = startLine
+    this.ch = startCh
+    this.getLine = getLine
+    this.lineStr = getLine(startLine)
     // :: [Frame]
     this.stack = []
     // :: [BacktrackFrame]
     this.backtrackStack = []
     this.callee = null
-    this.tokens = []
-    this.tokenPos = start
     this.frontierStack = null
     this.frontierBacktrack = null
-    this.frontierPos = -1
+    this.frontierLine = -1
+    this.frontierCh = -1
     this.skipping = false
   }
 
@@ -267,37 +268,58 @@ class ModeMatcher {
     return this.stack[this.stack.length - 1].arg
   }
 
+  goTo(line, ch) {
+    if (line != this.line) {
+      this.line = line
+      this.lineStr = this.getLine(line)
+    }
+    this.ch = ch
+  }
+
+  nextLine() {
+    let next = this.getLine(this.line + 1)
+    if (next == null) return false
+    this.line++
+    this.ch = 0
+    this.lineStr = next
+    return true
+  }
+
   re(re) {
-    let match = re.exec(this.input.slice(this.pos))
-    if (match) this.pos += match[0].length
+    let match = re.exec(this.lineStr.slice(this.ch))
+    if (match) this.ch += match[0].length
     return match || F
   }
 
-  str(string) {
-    if (this.input.slice(this.pos, this.pos + string.length) == string)
-      this.pos += string.length
+  str(string) { // FIXME newlines
+    if (this.lineStr.slice(this.ch, this.ch + string.length) == string)
+      this.ch += string.length
     else
       return F
   }
 
   eof() {
-    return this.pos == this.input.length ? null : F
+    return this.ch == this.lineStr.length && this.getLine(this.line + 1) == null ? null : F
   }
 
   any() {
-    if (this.pos == this.input.length) return F
-    this.pos++
-  }
-
-  setBacktrack(next, recover, lookahead) {
-    this.backtrackStack.push(new BacktrackFrame(this.pos, lookahead, this.stack.length, next, recover))
+    if (this.ch == this.lineStr.length)
+      return this.nextLine() ? null : F
+    else
+      this.ch++
   }
 
   group(str) {
-    if (this.pos < this.input.length && str.indexOf(this.input[this.pos]) > -1)
-      this.pos++
+    if (this.ch == this.lineStr.length)
+      return str.indexOf("\n") > -1 && this.nextLine() ? null : F
+    else if (str.indexOf(this.lineStr[this.ch]) > -1)
+      this.ch++
     else
       return F
+  }
+
+  setBacktrack(next, recover, lookahead) {
+    this.backtrackStack.push(new BacktrackFrame(this.line, this.ch, lookahead, this.stack.length, next, recover))
   }
 
   call(rule, next) {
@@ -305,19 +327,7 @@ class ModeMatcher {
   }
 
   callWith(rule, arg, next) {
-    let match
-    if (rule.cached) {
-      let argVal = arg == F ? null : arg
-      for (let cached = this.tokens[this.tokenPos + 1]; cached; cached = cached.parent) {
-        if (cached.rule === rule && cached.start == this.pos && cached.arg === argVal) {
-          cached.parent = this.currentMatch
-          this.pos = this.tokens[this.tokenPos]
-          this.tokenPos += 2
-          return next(this, cached.value)
-        }
-      }
-      match = new Match(rule, argVal, this.pos, this.currentMatch)
-    }
+    let match = rule.cached ? new Match(rule, arg == F ? null : arg, this.line, this.ch, this.currentMatch) : null
     this.stack.push(new Frame(match, arg, next))
     this.callee = rule
     return C
@@ -333,16 +343,19 @@ class ModeMatcher {
         let backtrack
         do {
           backtrack = this.backtrackStack.pop()
-        } while (backtrack && backtrack.pos < this.pos - MAX_BACKTRACK_DISTANCE)
+          // FIXME will backtrack across long lines
+        } while (backtrack && backtrack.line < this.line - MAX_BACKTRACK_LINES)
         if (backtrack) {
           if (!this.skipping &&
-              !backtrack.isLookahead && this.pos > this.frontierPos &&
-              this.pos > backtrack.pos + MIN_SAVE_DISTANCE) {
+              !backtrack.isLookahead &&
+              (this.line > this.frontierLine || this.line == this.frontierLine && this.ch > this.frontierCh) &&
+              (this.line > backtrack.line || this.ch > backtrack.ch + MIN_SAVE_DISTANCE)) {
             this.frontierStack = this.stack.slice()
             this.frontierBacktrack = this.backtrackStack.concat(backtrack)
-            this.frontierPos = this.pos
+            this.frontierLine = this.line
+            this.frontierCh = this.ch
           }
-          this.pos = backtrack.pos
+          this.goTo(backtrack.line, backtrack.ch)
           this.stack.length = backtrack.frameDepth
           result = backtrack.next(this)
         } else if (!this.frontierStack) {
@@ -350,17 +363,19 @@ class ModeMatcher {
         } else {
           if (onAdvance(this) === false) return
           this.stack = this.frontierStack.slice()
-          this.pos = this.frontierPos
+          this.goTo(this.frontierLine, this.frontierCh)
           this.skipping = true
           result = this.call(anyToken, m => {
             m.skipping = false
             m.backtrackStack = m.frontierBacktrack.slice()
-            m.frontierPos = this.pos
+            m.frontierLine = this.line
+            m.frontierCh = this.ch
             for (let i = 0; i < m.backtrackStack.length; i++) {
               let bt = m.backtrackStack[i]
-              bt.pos = m.pos
+              bt.line = m.line
+              bt.ch = m.ch
               if (bt.recover) {
-                m.backtrackStack.splice(++i, 0, new BacktrackFrame(m.pos, false, bt.frameDepth, bt.recover))
+                m.backtrackStack.splice(++i, 0, new BacktrackFrame(m.line, m.ch, false, bt.frameDepth, bt.recover))
                 bt.recover = null
               }
             }
@@ -373,22 +388,13 @@ class ModeMatcher {
         result = C
       } else {
         if (onAdvance(this) === false) return
-        if (this.tokenPos == 0 || this.tokens[this.tokenPos - 2] < this.pos) {
-          let cur = this.currentMatch
-          if (this.tokens[this.tokenPos - 1] == cur) {
-            this.tokens[this.tokenPos - 2] = this.pos
-          } else {
-            this.tokens[this.tokenPos++] = this.pos
-            this.tokens[this.tokenPos++] = this.currentMatch
-          }
-        }
-        let frame = this.stack.pop()
-        if (frame.match) frame.match.value = result
-        result = frame.next(this, result)
+        result = this.stack.pop().next(this, result)
       }
     }
   }
 }
 
-let m = new ModeMatcher("package foo;\n\nmessage Address {\n  required string foo = 1-\n  optional int32 bar = 2;\n}\n")
-m.exec(Program, m => m.pos < m.input.length)
+let lines = "package foo;\n\nmessage Address {\n  required string foo = 1-\n  optional int32 bar = 2;\n}\n".split("\n")
+
+let m = new ModeMatcher(n => lines[n], 0, 0)
+m.exec(Program, m => m.line < lines.length - 1)
