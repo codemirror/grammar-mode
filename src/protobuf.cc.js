@@ -42,7 +42,7 @@ function succeed_drop(m, v) {
 const Program = new Rule("Program", Program_0)
 
 function Program_0(m) {
-  while (m.group(space) != F) {}
+  while (m.stream.group(space)) {}
   return Program_1(m)
 }
 
@@ -57,7 +57,7 @@ function Program_2(m) {
 }
 
 function Program_3(m) {
-  return m.eof()
+  return m.stream.eof() || F
 }
 
 const Statement = new Rule("Statement", Statement_0)
@@ -136,10 +136,10 @@ function Field_6(m) {
 const identifier = new Rule("identifier", identifier_0, "variable")
 
 function identifier_0(m) {
-  let r = m.re(/^[a-z]\w*/i)
-  if (r == F) return F
+  let r = m.stream.re(/^[a-z]\w*/i)
+  if (!r) return F
   let value = r[0]
-  while (m.group(space) != F) {}
+  while (m.stream.group(space)) {}
   return value
 }
 
@@ -176,15 +176,15 @@ function modifier_1(_, ident) {
 const p = new Rule("p", p_0)
 
 function p_0(m) {
-  if (m.str(m.arg) == F) return F
-  while (m.group(space) != F) {}
+  if (!m.stream.str(m.arg)) return F
+  while (m.stream.group(space)) {}
 }
 
 const number = new Rule("number", number_0, "number")
 
 function number_0(m) {
-  if (m.re(/^\d+/) == F) return F
-  while (m.group(space) != F) {}
+  if (!m.stream.re(/^\d+/)) return F
+  while (m.stream.group(space)) {}
 }
 
 const anyToken = new Rule("anyToken", anyToken_0)
@@ -200,12 +200,12 @@ function anyToken_1(m) {
 }
 
 function anyToken_2(m) {
-  m.any()
-  while (m.group(space) != F) {}
+  m.stream.any()
+  while (m.stream.group(space)) {}
 }
 
 function anyTokens(m) {
-  if (m.eof() == F) return m.call(anyToken, anyTokens)
+  if (!m.stream.eof()) return m.call(anyToken, anyTokens)
 }
 
 class Match {
@@ -239,12 +239,85 @@ class BacktrackFrame {
 
 const MIN_SAVE_DISTANCE = 15, MAX_BACKTRACK_LINES = 10
 
-class ModeMatcher {
-  constructor(getLine, startLine = 0, startCh = 0) {
+class Stream {
+  constructor(getLine, startLine, startCh) {
     this.line = startLine
     this.ch = startCh
     this.getLine = getLine
-    this.lineStr = getLine(startLine)
+    this.curLine = getLine(startLine)
+    this._nextLine = undefined
+  }
+
+  get nextLine() {
+    if (this._nextLine === undefined) {
+      let next = this.getLine(this.line + 1)
+      this._nextLine = next === undefined ? null : next
+    }
+    return this._nextLine
+  }
+
+  goTo(line, ch) {
+    if (line != this.line) {
+      this.line = line
+      this.curLine = this.getLine(line)
+      this._nextLine = undefined
+    }
+    this.ch = ch
+  }
+
+  lineForward() {
+    let next = this.nextLine
+    if (next == null) return false
+    this.line++
+    this.ch = 0
+    this.curLine = next
+    this._nextLine = undefined
+    return true
+  }
+
+  re(re) {
+    let match = re.exec(this.curLine.slice(this.ch))
+    if (match) this.ch += match[0].length
+    return match || false
+  }
+
+  str(string) { // FIXME newlines
+    if (this.curLine.slice(this.ch, this.ch + string.length) == string) {
+      this.ch += string.length
+      return true
+    } else {
+      return false
+    }
+  }
+
+  eof() {
+    return this.ch == this.curLine.length && this.nextLine == null
+  }
+
+  any() {
+    if (this.ch == this.curLine.length) {
+      return this.lineForward()
+    } else {
+      this.ch++
+      return true
+    }
+  }
+
+  group(str) {
+    if (this.ch == this.curLine.length) {
+      return str.indexOf("\n") > -1 && this.lineForward()
+    } else if (str.indexOf(this.curLine[this.ch]) > -1) {
+      this.ch++
+      return true
+    } else {
+      return false
+    }
+  }
+}
+
+class ModeMatcher {
+  constructor(stream) {
+    this.stream = stream
     // :: [Frame]
     this.stack = []
     // :: [BacktrackFrame]
@@ -268,58 +341,8 @@ class ModeMatcher {
     return this.stack[this.stack.length - 1].arg
   }
 
-  goTo(line, ch) {
-    if (line != this.line) {
-      this.line = line
-      this.lineStr = this.getLine(line)
-    }
-    this.ch = ch
-  }
-
-  nextLine() {
-    let next = this.getLine(this.line + 1)
-    if (next == null) return false
-    this.line++
-    this.ch = 0
-    this.lineStr = next
-    return true
-  }
-
-  re(re) {
-    let match = re.exec(this.lineStr.slice(this.ch))
-    if (match) this.ch += match[0].length
-    return match || F
-  }
-
-  str(string) { // FIXME newlines
-    if (this.lineStr.slice(this.ch, this.ch + string.length) == string)
-      this.ch += string.length
-    else
-      return F
-  }
-
-  eof() {
-    return this.ch == this.lineStr.length && this.getLine(this.line + 1) == null ? null : F
-  }
-
-  any() {
-    if (this.ch == this.lineStr.length)
-      return this.nextLine() ? null : F
-    else
-      this.ch++
-  }
-
-  group(str) {
-    if (this.ch == this.lineStr.length)
-      return str.indexOf("\n") > -1 && this.nextLine() ? null : F
-    else if (str.indexOf(this.lineStr[this.ch]) > -1)
-      this.ch++
-    else
-      return F
-  }
-
   setBacktrack(next, recover, lookahead) {
-    this.backtrackStack.push(new BacktrackFrame(this.line, this.ch, lookahead, this.stack.length, next, recover))
+    this.backtrackStack.push(new BacktrackFrame(this.stream.line, this.stream.ch, lookahead, this.stack.length, next, recover))
   }
 
   call(rule, next) {
@@ -327,7 +350,7 @@ class ModeMatcher {
   }
 
   callWith(rule, arg, next) {
-    let match = rule.cached ? new Match(rule, arg == F ? null : arg, this.line, this.ch, this.currentMatch) : null
+    let match = rule.cached ? new Match(rule, arg == F ? null : arg, this.stream.line, this.stream.ch, this.currentMatch) : null
     this.stack.push(new Frame(match, arg, next))
     this.callee = rule
     return C
@@ -344,18 +367,18 @@ class ModeMatcher {
         do {
           backtrack = this.backtrackStack.pop()
           // FIXME will backtrack across long lines
-        } while (backtrack && backtrack.line < this.line - MAX_BACKTRACK_LINES)
+        } while (backtrack && backtrack.line < this.stream.line - MAX_BACKTRACK_LINES)
         if (backtrack) {
           if (!this.skipping &&
               !backtrack.isLookahead &&
-              (this.line > this.frontierLine || this.line == this.frontierLine && this.ch > this.frontierCh) &&
-              (this.line > backtrack.line || this.ch > backtrack.ch + MIN_SAVE_DISTANCE)) {
+              (this.stream.line > this.frontierLine || this.stream.line == this.frontierLine && this.ch > this.frontierCh) &&
+              (this.stream.line > backtrack.line || this.stream.ch > backtrack.ch + MIN_SAVE_DISTANCE)) {
             this.frontierStack = this.stack.slice()
             this.frontierBacktrack = this.backtrackStack.concat(backtrack)
-            this.frontierLine = this.line
-            this.frontierCh = this.ch
+            this.frontierLine = this.stream.line
+            this.frontierCh = this.stream.ch
           }
-          this.goTo(backtrack.line, backtrack.ch)
+          this.stream.goTo(backtrack.line, backtrack.ch)
           this.stack.length = backtrack.frameDepth
           result = backtrack.next(this)
         } else if (!this.frontierStack) {
@@ -363,19 +386,19 @@ class ModeMatcher {
         } else {
           if (onAdvance(this) === false) return
           this.stack = this.frontierStack.slice()
-          this.goTo(this.frontierLine, this.frontierCh)
+          this.stream.goTo(this.frontierLine, this.frontierCh)
           this.skipping = true
           result = this.call(anyToken, m => {
             m.skipping = false
             m.backtrackStack = m.frontierBacktrack.slice()
-            m.frontierLine = this.line
-            m.frontierCh = this.ch
+            m.frontierLine = this.stream.line
+            m.frontierCh = this.stream.ch
             for (let i = 0; i < m.backtrackStack.length; i++) {
               let bt = m.backtrackStack[i]
-              bt.line = m.line
-              bt.ch = m.ch
+              bt.line = m.stream.line
+              bt.ch = m.stream.ch
               if (bt.recover) {
-                m.backtrackStack.splice(++i, 0, new BacktrackFrame(m.line, m.ch, false, bt.frameDepth, bt.recover))
+                m.backtrackStack.splice(++i, 0, new BacktrackFrame(m.stream.line, m.stream.ch, false, bt.frameDepth, bt.recover))
                 bt.recover = null
               }
             }
@@ -396,5 +419,5 @@ class ModeMatcher {
 
 let lines = "package foo;\n\nmessage Address {\n  required string foo = 1-\n  optional int32 bar = 2;\n}\n".split("\n")
 
-let m = new ModeMatcher(n => lines[n], 0, 0)
-m.exec(Program, m => m.line < lines.length - 1)
+let m = new ModeMatcher(new Stream(n => lines[n], 0, 0))
+m.exec(Program, m => m.stream.line < lines.length - 1)
