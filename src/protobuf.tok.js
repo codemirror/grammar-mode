@@ -66,19 +66,19 @@ class Stream {
 }
 
 class Token {
-  constructor(name, test) {
+  constructor(name, match) {
     this.name = name
-    this.test = test
+    this.match = match
   }
 }
 
 let modifiers = ['required', 'optional', 'repeated', 'reserved', 'default', 'extensions', 'packed']
 let types = ['bool', 'bytes', 'double', 'float', 'string', 'int32', 'int64', 'uint32', 'uint64', 'sint32', 'sint64', 'fixed32', 'fixed64', 'sfixed32', 'sfixed64']
 
-const PACKAGE = new Token("package", stream => ID.test(stream) == "package")
-const MESSAGE = new Token("message", stream => ID.test(stream) == "message")
-const MODIFIER = new Token("modifier", stream => modifiers.indexOf(ID.test(stream)) > -1)
-const TYPE = new Token("type", stream => types.indexOf(ID.test(stream)) > -1)
+const PACKAGE = new Token("package", stream => ID.match(stream) == "package")
+const MESSAGE = new Token("message", stream => ID.match(stream) == "message")
+const MODIFIER = new Token("modifier", stream => modifiers.indexOf(ID.match(stream)) > -1)
+const TYPE = new Token("type", stream => types.indexOf(ID.match(stream)) > -1)
 const ID = new Token("id", stream => { let m = stream.re(/^[a-z]\w*/i); return m && m[0] })
 const NUMBER = new Token("number", stream => stream.re(/^\d+/))
 const COMMENT = new Token("comment", stream => stream.re(/^\/\/.*/))
@@ -119,7 +119,7 @@ class State {
       let next = this.stack[d]
       for (let i = 0; i < next.length; i += 2) {
         let token = next[i]
-        if (token.test(stream)) {
+        if (token.match(stream)) {
           this.stack.length = d + 1
           next[i + 1](this)
           return token.name
@@ -129,7 +129,7 @@ class State {
     }
     for (let i = 0; i < tokens.length; i++) {
       let token = tokens[i]
-      if (token.test(stream)) return token.name
+      if (token.match(stream)) return token.name
       stream.set(line, ch)
     }
     stream.any()
