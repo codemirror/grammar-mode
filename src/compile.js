@@ -24,9 +24,8 @@ class Graph {
     fillRule(this, this.rules[this.first])
   }
 
-  node(suffix) {
-    // FIXME make sure this is unique
-    let label = this.curLabel + (suffix ? "_" + suffix : "")
+  node(suffix, label) {
+    if (!label) label = this.curLabel + (suffix ? "_" + suffix : "")
     for (let i = 0;; i++) {
       let cur = i ? label + "_" + i : label
       if (!(cur in this.aliases)) return this.nodes[cur] = new Node(cur)
@@ -155,6 +154,15 @@ class ChoiceMatch extends Match {
   }
 }
 
+class RepeatMatch extends Match {
+  constructor(ast, match) {
+    super(ast)
+    this.match = match
+  }
+
+  toString() { return this.match.toString() + "*" }
+}
+
 class CallEffect {
   constructor(rule, returnTo) {
     this.rule = rule
@@ -239,13 +247,11 @@ function mergeEffects(a, b) {
 function simplifySequence(graph, node) {
   if (node.incoming.length != 1 || node.outgoing.length != 1) return false
   let inEdge = node.incoming[0], outEdge = node.outgoing[0]
-  // FIXME handle context effects
-  if (inEdge.from == node || outEdge.to == node) return false
-  if (inEdge.effects.some(e => e instanceof ReturnEffect)) return false
+  if (inEdge.from == node || outEdge.to == node || inEdge.effects.length || outEdge.effects.length)
+    return false
   inEdge.rm(); outEdge.rm()
   graph.merge(inEdge.from, node)
-  let effects = mergeEffects(inEdge.effects, outEdge.effects)
-  graph.edge(inEdge.from, outEdge.to, SeqMatch.create(inEdge.match, outEdge.match), effects)
+  graph.edge(inEdge.from, outEdge.to, SeqMatch.create(inEdge.match, outEdge.match))
   return true
 }
 
@@ -275,7 +281,25 @@ function simplifyChoice(graph, node) {
 }
 
 function simplifyRepeat(graph, node) {
-  // FIXME
+  let cycleIndex, cycleEdge
+  for (let i = 0; i < node.outgoing.length; i++) {
+    let edge = node.outgoing[i]
+    if (edge.to == node) {
+      if (cycleEdge) return false
+      cycleIndex = i
+      cycleEdge = edge
+    }
+  }
+  if (!cycleEdge) return false
+  let newNode = graph.node(null, node.label + "_split")
+  cycleEdge.rm()
+  while (node.outgoing.length) {
+    let edge = node.outgoing[0]
+    edge.rm()
+    graph.edge(newNode, edge.to, edge.match, edge.effects)
+  }
+  graph.edge(node, newNode, new RepeatMatch(cycleEdge.match.ast, cycleEdge.match), cycleEdge.effects)
+  return true
 }
 
 // Look for simplification possibilities around the given node, return
