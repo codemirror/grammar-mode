@@ -79,7 +79,7 @@ function parseExprSuffix(p) {
   if (p.type == tt.star || p.type == tt.question || p.type == tt.plusMin && p.value == "+") {
     let node = p.startNodeAt(start)
     node.expr = expr
-    node.kind = p.value
+    node.kind = p.type == tt.question ? "?" : p.type == tt.star ? "*" : p.value
     p.next()
     return p.finishNode(node, "RepeatedMatch")
   }

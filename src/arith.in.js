@@ -1,6 +1,6 @@
 grammar arith {
   rules {
-    Expr { num | var | Expr op Expr | '(' Expr ')' }
+    Expr { (num | var | '(' Expr ')') (op Expr)? }
   }
   tokens {
     num { '0'-'9'+ }
