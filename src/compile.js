@@ -14,14 +14,24 @@ class Graph {
     this.aliases = Object.create(this.nodes)
     this.curLabel = "-"
     this.rules = Object.create(null)
+    this.outside = this.node(null, "outside")
     this.grammar = grammar
     this.first = null
     for (let i = 0; i < grammar.rules.length; i++) {
-      let rule = grammar.rules[i]
-      this.rules[rule.id.name] = {ast: rule, start: null, end: null}
+      let rule = grammar.rules[i],
+          startNode = this.node(null, rule.id.name + "_start"),
+          endNode = this.node(null, rule.id.name + "_end")
+      this.rules[rule.id.name] = {ast: rule, start: startNode.label, end: endNode.label}
       if (this.first == null && !rule.lexical) this.first = rule.id.name
     }
-    fillRule(this, this.rules[this.first])
+    for (let n in this.rules) {
+      let {ast, start, end} = this.rules[n]
+      let endNode = this.nodes[end]
+      this.withLabels(ast.id.name, () => {
+        generateExpr(this.nodes[start], endNode, ast.expr, this)
+        this.edge(endNode, this.outside, new NullMatch(ast), [new ReturnEffect])
+      })
+    }
   }
 
   node(suffix, label) {
@@ -173,7 +183,7 @@ class CallEffect {
     return other instanceof CallEffect && other.rule == this.rule && other.returnTo == this.returnTo
   }
 
-  toString() { return "call " + this.rule.id.name }
+  toString() { return "call " + this.rule }
 }
 
 class ReturnEffect {
@@ -184,16 +194,15 @@ class ReturnEffect {
   toString() { return "return" }
 }
 
+class ReturnFromEffect {
+  constructor() {}
 
-function fillRule(graph, rule) {
-  graph.withLabels(rule.ast.id.name, () => {
-    let start = graph.node("start"), end = graph.node("end")
-    rule.start = start.label; rule.end = end.label
-    fillExpr(start, end, rule.ast.expr, graph)
-  })
+  eq(_other) { return false }
+
+  toString() { return "returnFrom" }
 }
 
-function fillExpr(start, end, expr, graph) {
+function generateExpr(start, end, expr, graph) {
   let t = expr.type
   if (t == "CharacterRange") {
     graph.edge(start, end, new RangeMatch(expr, expr.from, expr.to))
@@ -203,55 +212,64 @@ function fillExpr(start, end, expr, graph) {
     graph.edge(start, end, new AnyMatch(expr))
   } else if (t == "RuleIdentifier") {
     let rule = graph.rules[expr.id.name]
-    if (!rule.start) fillRule(graph, rule)
-    graph.edge(start, graph.aliases[rule.start], new NullMatch(expr), [new CallEffect(rule.ast, end)])
-    graph.edge(graph.aliases[rule.end], end, new NullMatch(expr), [new ReturnEffect])
+    if (!rule) throw new SyntaxError(`No rule '${expr.id.name}' defined`)
+    graph.edge(start, graph.aliases[rule.start], new NullMatch(expr), [new CallEffect(expr.id.name, end)])
+    graph.edge(graph.outside, end, new NullMatch(expr), [new ReturnFromEffect])
   } else if (t == "RepeatedMatch") {
     if (expr.kind == "*") {
       graph.edge(start, end, new NullMatch(expr))
-      fillExpr(start, start, expr.expr, graph)
+      generateExpr(start, start, expr.expr, graph)
     } else if (expr.kind == "+") {
-      fillExpr(start, end, expr.expr, graph)
-      fillExpr(end, end, expr.expr, graph)
+      generateExpr(start, end, expr.expr, graph)
+      generateExpr(end, end, expr.expr, graph)
     } else if (expr.kind == "?") {
       graph.edge(start, end, new NullMatch(expr))
-      fillExpr(start, end, expr.expr, graph)
+      generateExpr(start, end, expr.expr, graph)
     }
   } else if (t == "LookaheadMatch") {
     throw new Error("not supporting lookahead yet")
   } else if (t == "SequenceMatch") {
     for (let i = 0; i < expr.exprs.length; i++) {
       let to = i == expr.exprs.length - 1 ? end : graph.node()
-      fillExpr(start, to, expr.exprs[i], graph)
+      generateExpr(start, to, expr.exprs[i], graph)
       start = to
     }
   } else if (t == "ChoiceMatch") {
     for (let i = 0; i < expr.exprs.length; i++)
-      fillExpr(start, end, expr.exprs[i], graph)
+      generateExpr(start, end, expr.exprs[i], graph)
   } else {
     throw new Error("Unrecognized AST node type " + t)
   }
 }
 
-function mergeEffects(a, b) {
-  for (let i = 0; i < b.length; i++) {
-    if (b[i] instanceof ReturnEffect) for (let j = a.length - 1; j >= 0; j--) {
-      if (a[j] instanceof CallEffect)
-        return mergeEffects(a.slice(0, j).concat(a.slice(j + 1)),
-                            b.slice(0, i).concat(b.slice(i + 1)))
-    }
+function removeReturnFrom(graph, node) {
+  for (let i = 0; i < node.incoming.length; i++) {
+    let edge = node.incoming[i]
+    if (edge.from == graph.outside) return edge.rm()
   }
-  return a.concat(b)
+  throw new Error("No return from")
 }
 
 function simplifySequence(graph, node) {
   if (node.incoming.length != 1 || node.outgoing.length != 1) return false
   let inEdge = node.incoming[0], outEdge = node.outgoing[0]
-  if (inEdge.from == node || outEdge.to == node || inEdge.effects.length || outEdge.effects.length)
-    return false
+  let start = inEdge.from, end = outEdge.to, effects
+  if (start == node || end == node || start == graph.outside) return false
+  if (end == graph.outside) { // A return edge
+    let call = -1
+    for (let i = inEdge.effects.length - 1; i >= 0; i--) if (inEdge.effects[i] instanceof CallEffect) {
+      end = graph.aliases[inEdge.effects[i].returnTo]
+      removeReturnFrom(graph, end)
+      effects = inEdge.effects.slice(0, i).concat(inEdge.effects.slice(i + 1))
+      break
+    }
+    if (end == graph.outside) return false
+  } else {
+    effects = inEdge.effects.concat(outEdge.effects)
+  }
   inEdge.rm(); outEdge.rm()
-  graph.merge(inEdge.from, node)
-  graph.edge(inEdge.from, outEdge.to, SeqMatch.create(inEdge.match, outEdge.match))
+  graph.merge(start, node)
+  graph.edge(start, end, SeqMatch.create(inEdge.match, outEdge.match), effects)
   return true
 }
 
@@ -290,7 +308,7 @@ function simplifyRepeat(graph, node) {
       cycleEdge = edge
     }
   }
-  if (!cycleEdge) return false
+  if (!cycleEdge || cycleEdge.effects.length) return false
   let newNode = graph.node(null, node.label + "_split")
   cycleEdge.rm()
   while (node.outgoing.length) {
