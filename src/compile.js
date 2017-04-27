@@ -13,7 +13,6 @@ class Graph {
     this.nodes = Object.create(null)
     this.aliases = Object.create(this.nodes)
     this.curLabel = "-"
-    this.curLabelId = 0
     this.rules = Object.create(null)
     this.grammar = grammar
     this.first = null
@@ -26,8 +25,12 @@ class Graph {
   }
 
   node(suffix) {
-    let label = this.curLabel + "_" + (suffix || this.curLabelId++)
-    return this.nodes[label] = new Node(label)
+    // FIXME make sure this is unique
+    let label = this.curLabel + (suffix ? "_" + suffix : "")
+    for (let i = 0;; i++) {
+      let cur = i ? label + "_" + i : label
+      if (!(cur in this.aliases)) return this.nodes[cur] = new Node(cur)
+    }
   }
 
   edge(from, to, match, effects) {
@@ -43,12 +46,10 @@ class Graph {
   }
 
   withLabels(label, f) {
-    let prevLabel = this.curLabel, prevId = this.curLabelId
+    let prevLabel = this.curLabel
     this.curLabel = label
-    this.curLabelId = 0
     f()
     this.curLabel = prevLabel
-    this.curLabelId = prevId
   }
 }
 
