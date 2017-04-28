@@ -9,4 +9,5 @@ grammar arith {
   helpers {
     op { '+' | '-' | '/' | '*' }
   }
+  whitespace { (' ' | '\t' | '\n')* }
 }

@@ -14,33 +14,40 @@ function parseGrammar(p) {
       parseRules(p, node.rules, true, true)
     else if (p.eatContextual("helpers"))
       parseRules(p, node.rules, true, false)
-    else if (p.eatContextual("whitespace"))
-      node.whitespace = parseRule(p)
+    else if (p.isContextual("whitespace"))
+      node.whitespace = parseRule(p, true, false)
   }
+  checkDuplicate(p, node.rules)
   return p.finishNode(node, "GrammarDeclaration")
+}
+
+function checkDuplicate(p, rules) {
+  for (let i = 0; i < rules.length; i++) {
+    let name = rules[i].id.name
+    for (let j = i + 1; j < rules.length; j++) {
+      if (rules[j].id.name == name)
+        p.raise(rules[j].id.start, `Duplicate rule name '${name}'`)
+    }
+  }
 }
 
 function parseRules(p, rules, lexical, significant) {
   p.expect(tt.braceL)
-  while (!p.eat(tt.braceR)) {
-    let node = p.startNode()
-    node.lexical = lexical
-    node.significant = significant
-    node.id = p.parseIdent(true)
-    if (rules.some(r => r.id.name == node.id.name))
-      p.raise(node.id.start, "Duplicate rule name")
-    node.expr = parseRule(p)
-    if (p.eat(tt.arrow))
-      p.parseFunctionBody(node, true)
-    rules.push(p.finishNode(node, "RuleDeclaration"))
-  }
+  while (!p.eat(tt.braceR))
+    rules.push(parseRule(p, lexical, significant))
 }
 
-function parseRule(p) {
+function parseRule(p, lexical, significant) {
+  let node = p.startNode()
+  node.lexical = lexical
+  node.significant = significant
+  node.id = p.parseIdent(true)
   p.expect(tt.braceL)
-  let expr = parseExprChoice(p)
+  node.expr = parseExprChoice(p)
   p.expect(tt.braceR)
-  return expr
+  if (p.eat(tt.arrow))
+    p.parseFunctionBody(node, true)
+  return p.finishNode(node, "RuleDeclaration")
 }
 
 function parseExprInner(p) {

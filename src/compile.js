@@ -8,23 +8,27 @@ module.exports = function(ast, file) {
   return result
 }
 
+let WS = "_whitespace_"
+
 class Graph {
   constructor(grammar) {
     this.nodes = Object.create(null)
-    this.curLabel = "-"
+    this.curRule = null
     this.grammar = grammar
     this.rules = Object.create(null)
     this.first = null
     for (let i = 0; i < grammar.rules.length; i++) {
-      let rule = grammar.rules[i],
-          start = this.node(rule.id.name),
-          end = this.node(rule.id.name, "end")
-      this.rules[rule.id.name] = {ast: rule, start, end}
+      let rule = grammar.rules[i]
+      this.rules[rule.id.name] = {ast: rule, start: this.node(rule.id.name)}
       if (this.first == null && !rule.lexical) this.first = rule.id.name
     }
+    if (grammar.whitespace)
+      this.rules[WS] = {ast: grammar.whitespace, start: this.node(WS)}
+
     for (let n in this.rules) {
-      let {ast, start, end} = this.rules[n]
-      this.withLabels(ast.id.name, () => {
+      let {ast, start} = this.rules[n]
+      this.withRule(ast, () => {
+        let end = this.node(null, "end")
         generateExpr(start, end, ast.expr, this)
         this.edge(end, null, new NullMatch(ast), [new ReturnEffect])
       })
@@ -32,7 +36,7 @@ class Graph {
   }
 
   node(base, suffix) {
-    let label = (base || this.curLabel) + (suffix ? "_" + suffix : "")
+    let label = (base || this.curRule.id.name) + (suffix ? "_" + suffix : "")
     for (let i = 0;; i++) {
       let cur = i ? label + "_" + i : label
       if (!(cur in this.nodes)) {
@@ -48,11 +52,11 @@ class Graph {
     return edge
   }
 
-  withLabels(label, f) {
-    let prevLabel = this.curLabel
-    this.curLabel = label
+  withRule(rule, f) {
+    let prevRule = this.curRule
+    this.curRule = rule
     f()
-    this.curLabel = prevLabel
+    this.curRule = prevRule
   }
 
   gc() {
@@ -223,6 +227,11 @@ function generateExpr(start, end, expr, graph) {
     throw new Error("not supporting lookahead yet")
   } else if (t == "SequenceMatch") {
     for (let i = 0; i < expr.exprs.length; i++) {
+      if (i && !graph.curRule.lexical && graph.rules[WS]) {
+        let afterWS = graph.node()
+        graph.edge(start, graph.rules[WS].start, new NullMatch(expr), [new CallEffect(WS, afterWS)])
+        start = afterWS
+      }
       let to = i == expr.exprs.length - 1 ? end : graph.node()
       generateExpr(start, to, expr.exprs[i], graph)
       start = to
@@ -266,17 +275,23 @@ function sameEffect(edge1, edge2) {
 }
 
 function simplifyChoice(graph, node, edges) {
-  if (edges.length < 2) return false
-  let first = edges[0]
-  for (let i = 1; i < edges.length; i++) {
-    let edge = edges[i]
-    if (edge.to != first.to || !sameEffect(edge, first)) return false
+  for (let i = 0; i < edges.length; i++) {
+    let edge = edges[i], set
+    if (edge.match instanceof NullMatch) continue
+    for (let j = i + 1; j < edges.length; j++) {
+      let other = edges[j]
+      if (other.to == edge.to && sameEffect(edge, other) && !(other.match instanceof NullMatch))
+        (set || (set = [edge])).push(other)
+    }
+    if (set) {
+      let match = set[0].match
+      for (let j = 1; j < set.length; j++)
+        match = ChoiceMatch.create(match, set[j].match)
+      graph.nodes[node] = edges.filter(e => set.indexOf(e) == -1).concat(new Edge(edge.to, match, edge.effects))
+      return true
+    }
   }
-  let match = first.match
-  for (let i = 1; i < edges.length; i++)
-    match = ChoiceMatch.create(match, edges[i].match)
-  graph.nodes[node] = [new Edge(first.to, match, first.effects)]
-  return true
+  return false
 }
 
 function simplifyRepeat(graph, node, edges) {
