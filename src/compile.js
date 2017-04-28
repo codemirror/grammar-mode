@@ -11,47 +11,41 @@ module.exports = function(ast, file) {
 class Graph {
   constructor(grammar) {
     this.nodes = Object.create(null)
-    this.aliases = Object.create(this.nodes)
     this.curLabel = "-"
-    this.rules = Object.create(null)
-    this.outside = this.node(null, "outside")
     this.grammar = grammar
+    this.rules = Object.create(null)
     this.first = null
     for (let i = 0; i < grammar.rules.length; i++) {
       let rule = grammar.rules[i],
-          startNode = this.node(null, rule.id.name + "_start"),
-          endNode = this.node(null, rule.id.name + "_end")
-      this.rules[rule.id.name] = {ast: rule, start: startNode.label, end: endNode.label}
+          start = this.node(rule.id.name),
+          end = this.node(rule.id.name, "end")
+      this.rules[rule.id.name] = {ast: rule, start, end}
       if (this.first == null && !rule.lexical) this.first = rule.id.name
     }
     for (let n in this.rules) {
       let {ast, start, end} = this.rules[n]
-      let endNode = this.nodes[end]
       this.withLabels(ast.id.name, () => {
-        generateExpr(this.nodes[start], endNode, ast.expr, this)
-        this.edge(endNode, this.outside, new NullMatch(ast), [new ReturnEffect])
+        generateExpr(start, end, ast.expr, this)
+        this.edge(end, null, new NullMatch(ast), [new ReturnEffect])
       })
     }
   }
 
-  node(suffix, label) {
-    if (!label) label = this.curLabel + (suffix ? "_" + suffix : "")
+  node(base, suffix) {
+    let label = (base || this.curLabel) + (suffix ? "_" + suffix : "")
     for (let i = 0;; i++) {
       let cur = i ? label + "_" + i : label
-      if (!(cur in this.aliases)) return this.nodes[cur] = new Node(cur)
+      if (!(cur in this.nodes)) {
+        this.nodes[cur] = []
+        return cur
+      }
     }
   }
 
   edge(from, to, match, effects) {
-    let edge = new Edge(from, to, match, effects)
-    from.outgoing.push(edge)
-    to.incoming.push(edge)
+    let edge = new Edge(to, match, effects)
+    this.nodes[from].push(edge)
     return edge
-  }
-
-  merge(a, b) {
-    this.aliases[b.label] = a
-    delete this.nodes[b.label]
   }
 
   withLabels(label, f) {
@@ -60,34 +54,42 @@ class Graph {
     f()
     this.curLabel = prevLabel
   }
-}
 
-class Node {
-  constructor(label) {
-    this.label = label
-    this.incoming = []
-    this.outgoing = []
+  gc() {
+    let reached = Object.create(null), work = []
+
+    function reach(node) {
+      if (node in reached) return
+      reached[node] = true
+      work.push(node)
+    }
+    reach(this.rules[this.first].start)
+
+    while (work.length) {
+      let next = this.nodes[work.pop()]
+      for (let i = 0; i < next.length; i++) {
+        let edge = next[i]
+        if (edge.to) reach(edge.to)
+        for (let j = 0; j < edge.effects.length; j++)
+          if (edge.effects[j] instanceof CallEffect)
+            reach(edge.effects[j].returnTo)
+      }
+    }
+
+    for (let n in this.nodes) if (!(n in reached)) delete this.nodes[n]
   }
-
-  toString() { return this.label }
 }
 
 class Edge {
-  constructor(from, to, match, effects) {
-    this.from = from
+  constructor(to, match, effects) {
     this.to = to
     this.match = match
     this.effects = effects || []
   }
 
-  rm() {
-    this.from.outgoing.splice(this.from.outgoing.indexOf(this), 1)
-    this.to.incoming.splice(this.to.incoming.indexOf(this), 1)
-  }
-
-  toString() {
+  toString(from) {
     let effects = this.effects.length ? " " + this.effects.join(" ") : ""
-    return `${this.from} -> ${this.to}[label=${JSON.stringify(this.match.toString() + effects)}]`
+    return `${from} -> ${this.to || "NULL"}[label=${JSON.stringify(this.match.toString() + effects)}]`
   }
 }
 
@@ -183,7 +185,7 @@ class CallEffect {
     return other instanceof CallEffect && other.rule == this.rule && other.returnTo == this.returnTo
   }
 
-  toString() { return "call " + this.rule }
+  toString() { return `call ${this.rule} -> ${this.returnTo}` }
 }
 
 class ReturnEffect {
@@ -192,14 +194,6 @@ class ReturnEffect {
   eq(other) { return other instanceof ReturnEffect }
 
   toString() { return "return" }
-}
-
-class ReturnFromEffect {
-  constructor() {}
-
-  eq(_other) { return false }
-
-  toString() { return "returnFrom" }
 }
 
 function generateExpr(start, end, expr, graph) {
@@ -213,8 +207,7 @@ function generateExpr(start, end, expr, graph) {
   } else if (t == "RuleIdentifier") {
     let rule = graph.rules[expr.id.name]
     if (!rule) throw new SyntaxError(`No rule '${expr.id.name}' defined`)
-    graph.edge(start, graph.aliases[rule.start], new NullMatch(expr), [new CallEffect(expr.id.name, end)])
-    graph.edge(graph.outside, end, new NullMatch(expr), [new ReturnFromEffect])
+    graph.edge(start, rule.start, new NullMatch(expr), [new CallEffect(expr.id.name, end)])
   } else if (t == "RepeatedMatch") {
     if (expr.kind == "*") {
       graph.edge(start, end, new NullMatch(expr))
@@ -242,35 +235,26 @@ function generateExpr(start, end, expr, graph) {
   }
 }
 
-function removeReturnFrom(graph, node) {
-  for (let i = 0; i < node.incoming.length; i++) {
-    let edge = node.incoming[i]
-    if (edge.from == graph.outside) return edge.rm()
-  }
-  throw new Error("No return from")
-}
-
-function simplifySequence(graph, node) {
-  if (node.incoming.length != 1 || node.outgoing.length != 1) return false
-  let inEdge = node.incoming[0], outEdge = node.outgoing[0]
-  let start = inEdge.from, end = outEdge.to, effects
-  if (start == node || end == node || start == graph.outside) return false
-  if (end == graph.outside) { // A return edge
-    let call = -1
-    for (let i = inEdge.effects.length - 1; i >= 0; i--) if (inEdge.effects[i] instanceof CallEffect) {
-      end = graph.aliases[inEdge.effects[i].returnTo]
-      removeReturnFrom(graph, end)
-      effects = inEdge.effects.slice(0, i).concat(inEdge.effects.slice(i + 1))
-      break
+function simplifySequence(graph, node, edges) {
+  for (let i = 0; i < edges.length; i++) {
+    let first = edges[i], next
+    if (first.to == node || !first.to || (next = graph.nodes[first.to]).length != 1) continue
+    let second = next[0], end = second.to, effects
+    if (end == first.to) continue
+    // If second is a return edge
+    if (!end) for (let j = first.effects.length - 1; j >= 0; j--) {
+      if (first.effects[j] instanceof CallEffect) {
+      // Matching call found, wire directly to return address, remove call/return effects
+        end = first.effects[j].returnTo
+        effects = first.effects.slice(0, j).concat(first.effects.slice(j + 1))
+          .concat(second.effects.filter(e => !(e instanceof ReturnEffect)))
+      }
     }
-    if (end == graph.outside) return false
-  } else {
-    effects = inEdge.effects.concat(outEdge.effects)
+    if (!effects) effects = first.effects.concat(second.effects)
+    edges[i] = new Edge(end, SeqMatch.create(first.match, second.match), effects)
+    return true
   }
-  inEdge.rm(); outEdge.rm()
-  graph.merge(start, node)
-  graph.edge(start, end, SeqMatch.create(inEdge.match, outEdge.match), effects)
-  return true
+  return false
 }
 
 function sameEffect(edge1, edge2) {
@@ -281,27 +265,24 @@ function sameEffect(edge1, edge2) {
   return true
 }
 
-function simplifyChoice(graph, node) {
-  if (node.outgoing.length < 2) return false
-  let first = node.outgoing[0]
-  for (let i = 1; i < node.outgoing.length; i++) {
-    let edge = node.outgoing[i]
+function simplifyChoice(graph, node, edges) {
+  if (edges.length < 2) return false
+  let first = edges[0]
+  for (let i = 1; i < edges.length; i++) {
+    let edge = edges[i]
     if (edge.to != first.to || !sameEffect(edge, first)) return false
   }
   let match = first.match
-  first.rm()
-  while (node.outgoing.length) {
-    match = ChoiceMatch.create(match, node.outgoing[0].match)
-    node.outgoing[0].rm()
-  }
-  graph.edge(node, first.to, match, first.effects)
+  for (let i = 1; i < edges.length; i++)
+    match = ChoiceMatch.create(match, edges[i].match)
+  graph.nodes[node] = [new Edge(first.to, match, first.effects)]
   return true
 }
 
-function simplifyRepeat(graph, node) {
+function simplifyRepeat(graph, node, edges) {
   let cycleIndex, cycleEdge
-  for (let i = 0; i < node.outgoing.length; i++) {
-    let edge = node.outgoing[i]
+  for (let i = 0; i < edges.length; i++) {
+    let edge = edges[i]
     if (edge.to == node) {
       if (cycleEdge) return false
       cycleIndex = i
@@ -309,14 +290,9 @@ function simplifyRepeat(graph, node) {
     }
   }
   if (!cycleEdge || cycleEdge.effects.length) return false
-  let newNode = graph.node(null, node.label + "_split")
-  cycleEdge.rm()
-  while (node.outgoing.length) {
-    let edge = node.outgoing[0]
-    edge.rm()
-    graph.edge(newNode, edge.to, edge.match, edge.effects)
-  }
-  graph.edge(node, newNode, new RepeatMatch(cycleEdge.match.ast, cycleEdge.match), cycleEdge.effects)
+  let newNode = graph.node(node, "split")
+  graph.nodes[newNode] = edges.slice(0, cycleIndex).concat(edges.slice(cycleIndex + 1))
+  graph.nodes[node] = [new Edge(newNode, new RepeatMatch(cycleEdge.match.ast, cycleEdge.match), cycleEdge.effects)]
   return true
 }
 
@@ -324,9 +300,9 @@ function simplifyRepeat(graph, node) {
 // true if anything was done
 function simplifyWith(graph, simplifiers) {
   let changed = false
-  for (let n in graph.nodes) {
-    let node = graph.nodes[n]
-    for (let i = 0; i < simplifiers.length; i++) if (simplifiers[i](graph, node)) {
+  for (let node in graph.nodes) {
+    let edges = graph.nodes[node]
+    for (let i = 0; i < simplifiers.length; i++) if (simplifiers[i](graph, node, edges)) {
       changed = true
       break
     }
@@ -340,10 +316,10 @@ function simplify(graph) {
 
 function printGraph(graph) {
   let output = "digraph {\n"
-  for (let n in graph.nodes) {
-    let node = graph.nodes[n]
-    for (let i = 0; i < node.outgoing.length; i++)
-      output += "  " + node.outgoing[i].toString() + ";\n"
+  for (let node in graph.nodes) {
+    let edges = graph.nodes[node]
+    for (let i = 0; i < edges.length; i++)
+      output += "  " + edges[i].toString(node) + ";\n"
   }
   return output + "}\n"
 }
@@ -351,6 +327,7 @@ function printGraph(graph) {
 function compileGrammar(grammar, file) {
   let graph = new Graph(grammar)
   simplify(graph)
+  graph.gc()
   console.log(printGraph(graph))
   return "FIXME"
 }
