@@ -30,7 +30,7 @@ class Graph {
       this.withRule(ast, () => {
         let end = this.node(null, "end")
         generateExpr(start, end, ast.expr, this)
-        this.edge(end, null, new NullMatch(ast), [new ReturnEffect])
+        this.edge(end, null, null, [new ReturnEffect])
       })
     }
   }
@@ -47,7 +47,7 @@ class Graph {
   }
 
   edge(from, to, match, effects) {
-    let edge = new Edge(to, match, effects)
+    let edge = new Edge(to, match || nullMatch, effects)
     this.nodes[from].push(edge)
     return edge
   }
@@ -97,22 +97,16 @@ class Edge {
   }
 }
 
-class Match {
-  constructor(ast) { this.ast = ast }
-}
-
-class StringMatch extends Match {
-  constructor(ast, string) {
-    super(ast)
+class StringMatch {
+  constructor(string) {
     this.string = string
   }
 
   toString() { return JSON.stringify(this.string) }
 }
 
-class RangeMatch extends Match {
-  constructor(ast, from, to) {
-    super(ast)
+class RangeMatch {
+  constructor(from, to) {
     this.from = from
     this.to = to
   }
@@ -120,41 +114,39 @@ class RangeMatch extends Match {
   toString() { return JSON.stringify(this.from) + "-" + JSON.stringify(this.to) }
 }
 
-class AnyMatch extends Match {
+const anyMatch = new class AnyMatch {
   toString() { return "_" }
 }
 
-class NullMatch extends Match {
+const nullMatch = new class NullMatch {
   toString() { return "ø" }
 }
 
-class SeqMatch extends Match {
-  constructor(ast, matches) {
-    super(ast)
+class SeqMatch {
+  constructor(matches) {
     this.matches = matches
   }
 
   toString() { return this.matches.join(" ") }
 
   static create(left, right) {
-    if (left instanceof NullMatch) return right
-    if (right instanceof NullMatch) return left
+    if (left == nullMatch) return right
+    if (right == nullMatch) return left
     let matches = []
     if (left instanceof SeqMatch) matches = matches.concat(left.matches)
     else matches.push(left)
     let last = matches[matches.length - 1]
     if (right instanceof StringMatch && last instanceof StringMatch)
-      matches[matches.length - 1] = new StringMatch(last.ast, last.value + right.value)
+      matches[matches.length - 1] = new StringMatch(last.value + right.value)
     else if (right instanceof SeqMatch) matches = matches.concat(right.matches)
     else matches.push(right)
     if (matches.length == 1) return matches[0]
-    else return new SeqMatch(left.ast, matches)
+    else return new SeqMatch(matches)
   }
 }
 
-class ChoiceMatch extends Match {
-  constructor(ast, matches) {
-    super(ast)
+class ChoiceMatch {
+  constructor(matches) {
     this.matches = matches
   }
 
@@ -166,13 +158,12 @@ class ChoiceMatch extends Match {
     else matches.push(left)
     if (right instanceof ChoiceMatch) matches = matches.concat(right.matches)
     else matches.push(right)
-    return new ChoiceMatch(left.ast, matches)
+    return new ChoiceMatch(matches)
   }
 }
 
-class RepeatMatch extends Match {
-  constructor(ast, match) {
-    super(ast)
+class RepeatMatch {
+  constructor(match) {
     this.match = match
   }
 
@@ -203,24 +194,24 @@ class ReturnEffect {
 function generateExpr(start, end, expr, graph) {
   let t = expr.type
   if (t == "CharacterRange") {
-    graph.edge(start, end, new RangeMatch(expr, expr.from, expr.to))
+    graph.edge(start, end, new RangeMatch(expr.from, expr.to))
   } else if (t == "StringMatch") {
-    graph.edge(start, end, new StringMatch(expr, expr.value))
+    graph.edge(start, end, new StringMatch(expr.value))
   } else if (t == "AnyMatch") {
-    graph.edge(start, end, new AnyMatch(expr))
+    graph.edge(start, end, anyMatch)
   } else if (t == "RuleIdentifier") {
     let rule = graph.rules[expr.id.name]
     if (!rule) throw new SyntaxError(`No rule '${expr.id.name}' defined`)
-    graph.edge(start, rule.start, new NullMatch(expr), [new CallEffect(expr.id.name, end)])
+    graph.edge(start, rule.start, null, [new CallEffect(expr.id.name, end)])
   } else if (t == "RepeatedMatch") {
     if (expr.kind == "*") {
-      graph.edge(start, end, new NullMatch(expr))
+      graph.edge(start, end)
       generateExpr(start, start, expr.expr, graph)
     } else if (expr.kind == "+") {
       generateExpr(start, end, expr.expr, graph)
       generateExpr(end, end, expr.expr, graph)
     } else if (expr.kind == "?") {
-      graph.edge(start, end, new NullMatch(expr))
+      graph.edge(start, end)
       generateExpr(start, end, expr.expr, graph)
     }
   } else if (t == "LookaheadMatch") {
@@ -229,7 +220,7 @@ function generateExpr(start, end, expr, graph) {
     for (let i = 0; i < expr.exprs.length; i++) {
       if (i && !graph.curRule.lexical && graph.rules[WS]) {
         let afterWS = graph.node()
-        graph.edge(start, graph.rules[WS].start, new NullMatch(expr), [new CallEffect(WS, afterWS)])
+        graph.edge(start, graph.rules[WS].start, null, [new CallEffect(WS, afterWS)])
         start = afterWS
       }
       let to = i == expr.exprs.length - 1 ? end : graph.node()
@@ -277,10 +268,10 @@ function sameEffect(edge1, edge2) {
 function simplifyChoice(graph, node, edges) {
   for (let i = 0; i < edges.length; i++) {
     let edge = edges[i], set
-    if (edge.match instanceof NullMatch) continue
+    if (edge.match == nullMatch) continue
     for (let j = i + 1; j < edges.length; j++) {
       let other = edges[j]
-      if (other.to == edge.to && sameEffect(edge, other) && !(other.match instanceof NullMatch))
+      if (other.to == edge.to && sameEffect(edge, other) && other.match != nullMatch)
         (set || (set = [edge])).push(other)
     }
     if (set) {
@@ -307,7 +298,7 @@ function simplifyRepeat(graph, node, edges) {
   if (!cycleEdge || cycleEdge.effects.length) return false
   let newNode = graph.node(node, "split")
   graph.nodes[newNode] = edges.slice(0, cycleIndex).concat(edges.slice(cycleIndex + 1))
-  graph.nodes[node] = [new Edge(newNode, new RepeatMatch(cycleEdge.match.ast, cycleEdge.match), cycleEdge.effects)]
+  graph.nodes[node] = [new Edge(newNode, new RepeatMatch(cycleEdge.match), cycleEdge.effects)]
   return true
 }
 
