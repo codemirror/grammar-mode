@@ -28,15 +28,15 @@ class Graph {
     for (let n in this.rules) {
       let {ast, start} = this.rules[n]
       this.withRule(ast, () => {
-        let end = this.node(null, "end"), endEffect = [returnEffect]
-        if (ast.significant) {
-          endEffect.unshift(popContext)
-          let newStart = this.node(null, "push")
-          this.edge(start, newStart, null, [new PushContext(ast.id.name)])
-          start = newStart
-        }
+        let end = this.node(null, "end")
         generateExpr(start, end, ast.expr, this)
-        this.edge(end, null, null, endEffect)
+        if (ast.significant) {
+          let push = new PushContext(ast.id.name)
+          this.nodes[start].forEach(edge => edge.effects.unshift(push))
+          this.edge(end, null, null, [popContext, returnEffect])
+        } else {
+          this.edge(end, null, null, [returnEffect])
+        }
       })
     }
   }
