@@ -28,9 +28,15 @@ class Graph {
     for (let n in this.rules) {
       let {ast, start} = this.rules[n]
       this.withRule(ast, () => {
-        let end = this.node(null, "end")
+        let end = this.node(null, "end"), endEffect = [returnEffect]
+        if (ast.significant) {
+          endEffect.unshift(popContext)
+          let newStart = this.node(null, "push")
+          this.edge(start, newStart, null, [new PushContext(ast.id.name)])
+          start = newStart
+        }
         generateExpr(start, end, ast.expr, this)
-        this.edge(end, null, null, [new ReturnEffect])
+        this.edge(end, null, null, endEffect)
       })
     }
   }
@@ -103,6 +109,8 @@ class StringMatch {
   }
 
   toString() { return JSON.stringify(this.string) }
+
+  get isNull() { return false }
 }
 
 class RangeMatch {
@@ -112,14 +120,18 @@ class RangeMatch {
   }
 
   toString() { return JSON.stringify(this.from) + "-" + JSON.stringify(this.to) }
+
+  get isNull() { return false }
 }
 
 const anyMatch = new class AnyMatch {
   toString() { return "_" }
+  get isNull() { return false }
 }
 
 const nullMatch = new class NullMatch {
   toString() { return "ø" }
+  get isNull() { return true }
 }
 
 class SeqMatch {
@@ -128,6 +140,8 @@ class SeqMatch {
   }
 
   toString() { return this.matches.join(" ") }
+
+  get isNull() { return this.matches.every(m => m.isNull) }
 
   static create(left, right) {
     if (left == nullMatch) return right
@@ -151,6 +165,8 @@ class ChoiceMatch {
   }
 
   toString() { return "(" + this.matches.join(" | ") + ")" }
+
+  get isNull() { return false }
 
   static create(left, right) {
     let matches = []
@@ -183,12 +199,23 @@ class CallEffect {
   toString() { return `call ${this.rule} -> ${this.returnTo}` }
 }
 
-class ReturnEffect {
-  constructor() {}
-
-  eq(other) { return other instanceof ReturnEffect }
+const returnEffect = new class ReturnEffect {
+  eq(other) { return other == this }
 
   toString() { return "return" }
+}
+
+class PushContext {
+  constructor(name) {
+    this.name = name
+  }
+  eq(other) { return other instanceof PushContext && other.name == this.name }
+  toString() { return `push ${this.name}` }
+}
+
+const popContext = new class PopContext {
+  eq(other) { return other == this }
+  toString() { return "pop" }
 }
 
 function generateExpr(start, end, expr, graph) {
@@ -240,14 +267,17 @@ function simplifySequence(graph, node, edges) {
     let first = edges[i], next
     if (first.to == node || !first.to || (next = graph.nodes[first.to]).length != 1) continue
     let second = next[0], end = second.to, effects
-    if (end == first.to) continue
+    if (end == first.to ||
+        (!first.match.isNull && second.effects.some(e => e instanceof PushContext)) ||
+        (!second.match.isNull && first.effects.indexOf(popContext) > -1))
+      continue
     // If second is a return edge
     if (!end) for (let j = first.effects.length - 1; j >= 0; j--) {
       if (first.effects[j] instanceof CallEffect) {
       // Matching call found, wire directly to return address, remove call/return effects
         end = first.effects[j].returnTo
         effects = first.effects.slice(0, j).concat(first.effects.slice(j + 1))
-          .concat(second.effects.filter(e => !(e instanceof ReturnEffect)))
+          .concat(second.effects.filter(e => e != returnEffect))
       }
     }
     if (!effects) effects = first.effects.concat(second.effects)
@@ -268,10 +298,10 @@ function sameEffect(edge1, edge2) {
 function simplifyChoice(graph, node, edges) {
   for (let i = 0; i < edges.length; i++) {
     let edge = edges[i], set
-    if (edge.match == nullMatch) continue
+    if (edge.match.isNull) continue
     for (let j = i + 1; j < edges.length; j++) {
       let other = edges[j]
-      if (other.to == edge.to && sameEffect(edge, other) && other.match != nullMatch)
+      if (other.to == edge.to && sameEffect(edge, other) && !other.match.isNull)
         (set || (set = [edge])).push(other)
     }
     if (set) {
