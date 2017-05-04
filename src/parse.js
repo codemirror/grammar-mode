@@ -4,49 +4,47 @@ function parseGrammar(p) {
   let node = p.startNode()
   p.next()
   node.id = p.parseIdent()
-  node.rules = []
-  node.whitespace = null
+  node.rules = Object.create(null)
   p.expect(tt.braceL)
   while (!p.eat(tt.braceR)) {
-    if (p.eatContextual("rules"))
-      parseRules(p, node.rules, false, true)
-    else if (p.eatContextual("tokens"))
-      parseRules(p, node.rules, true, true)
-    else if (p.eatContextual("helpers"))
-      parseRules(p, node.rules, true, false)
-    else if (p.isContextual("whitespace"))
-      node.whitespace = parseRule(p, true, false)
+    if (p.eat(tt._with)) {
+      p.expect(tt.parenL)
+      let space = p.parseIdent(true)
+      p.expect(tt.parenR)
+      p.expect(tt.braceL)
+      while (!p.eat(tt.braceR))
+        parseRule(p, node.rules, false, space)
+    } else if (p.eatContextual("tokens")) {
+      p.expect(tt.braceL)
+      while (!p.eat(tt.braceR))
+        parseRule(p, node.rules, true, null)
+    } else {
+      parseRule(p, node.rules, false, null)
+    }
   }
-  checkDuplicate(p, node.rules)
   return p.finishNode(node, "GrammarDeclaration")
 }
 
-function checkDuplicate(p, rules) {
-  for (let i = 0; i < rules.length; i++) {
-    let name = rules[i].id.name
-    for (let j = i + 1; j < rules.length; j++) {
-      if (rules[j].id.name == name)
-        p.raise(rules[j].id.start, `Duplicate rule name '${name}'`)
-    }
-  }
-}
-
-function parseRules(p, rules, lexical, significant) {
-  p.expect(tt.braceL)
-  while (!p.eat(tt.braceR))
-    rules.push(parseRule(p, lexical, significant))
-}
-
-function parseRule(p, lexical, significant) {
+function parseRule(p, rules, isToken, withSpace) {
   let node = p.startNode()
-  node.lexical = lexical
-  node.significant = significant
+  node.isToken = isToken
+  node.space = withSpace
   node.id = p.parseIdent(true)
+  if (node.id.name in rules)
+    p.raise(node.id.start, `Duplicate rule declaration '${node.id.name}'`)
+  rules[node.id.name] = node
+  if (p.eat(tt.star)) {
+    node.value = true
+  } else if (p.eat(tt.eq)) {
+    if (p.type != tt.string) p.unexpected()
+    node.value = p.value
+    p.next()
+  } else {
+    node.value = null
+  }
   p.expect(tt.braceL)
   node.expr = parseExprChoice(p)
   p.expect(tt.braceR)
-  if (p.eat(tt.arrow))
-    p.parseFunctionBody(node, true)
   return p.finishNode(node, "RuleDeclaration")
 }
 

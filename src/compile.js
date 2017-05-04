@@ -8,30 +8,24 @@ module.exports = function(ast, file) {
   return result
 }
 
-let WS = "_whitespace_"
-
 class Graph {
   constructor(grammar) {
     this.nodes = Object.create(null)
     this.curRule = null
-    this.grammar = grammar
     this.rules = Object.create(null)
     this.first = null
-    for (let i = 0; i < grammar.rules.length; i++) {
-      let rule = grammar.rules[i]
-      this.rules[rule.id.name] = {ast: rule, start: this.node(rule.id.name)}
-      if (this.first == null && !rule.lexical) this.first = rule.id.name
+    for (let name in grammar.rules) {
+      if (this.first == null) this.first = name
+      this.rules[name] = {ast: grammar.rules[name], start: this.node(name)}
     }
-    if (grammar.whitespace)
-      this.rules[WS] = {ast: grammar.whitespace, start: this.node(WS)}
 
     for (let n in this.rules) {
       let {ast, start} = this.rules[n]
       this.withRule(ast, () => {
         let end = this.node(null, "end")
         generateExpr(start, end, ast.expr, this)
-        if (ast.significant) {
-          let push = new PushContext(ast.id.name)
+        if (ast.value) {
+          let push = new PushContext(ast.id.name, ast.value)
           this.nodes[start].forEach(edge => edge.effects.unshift(push))
           this.edge(end, null, null, [popContext, returnEffect])
         } else {
@@ -206,8 +200,9 @@ const returnEffect = new class ReturnEffect {
 }
 
 class PushContext {
-  constructor(name) {
+  constructor(name, value) {
     this.name = name
+    this.value = value
   }
   eq(other) { return other instanceof PushContext && other.name == this.name }
   toString() { return `push ${this.name}` }
@@ -216,6 +211,16 @@ class PushContext {
 const popContext = new class PopContext {
   eq(other) { return other == this }
   toString() { return "pop" }
+}
+
+function maybeSpaceBefore(node, graph) {
+  let withSpace = graph.curRule.withSpace
+  if (!withSpace) return node
+  let space = graph.rules[withSpace.name]
+  if (!space) throw new SyntaxError(`Missing space rule for '${withSpace.name}'`)
+  let before = graph.node()
+  graph.edge(before, node, null, [new CallEffect(withSpace.name, before)])
+  return before
 }
 
 function generateExpr(start, end, expr, graph) {
@@ -233,26 +238,26 @@ function generateExpr(start, end, expr, graph) {
   } else if (t == "RepeatedMatch") {
     if (expr.kind == "*") {
       graph.edge(start, end)
-      generateExpr(start, start, expr.expr, graph)
+      generateExpr(end, maybeSpaceBefore(end, graph), expr.expr, graph)
     } else if (expr.kind == "+") {
       generateExpr(start, end, expr.expr, graph)
-      generateExpr(end, end, expr.expr, graph)
+      generateExpr(end, maybeSpaceBefore(end, graph), expr.expr, graph)
     } else if (expr.kind == "?") {
       graph.edge(start, end)
-      generateExpr(start, end, expr.expr, graph)
+      generateExpr(start, maybeSpaceBefore(end, graph), expr.expr, graph)
     }
   } else if (t == "LookaheadMatch") {
     throw new Error("not supporting lookahead yet")
   } else if (t == "SequenceMatch") {
     for (let i = 0; i < expr.exprs.length; i++) {
-      if (i && !graph.curRule.lexical && graph.rules[WS]) {
-        let afterWS = graph.node()
-        graph.edge(start, graph.rules[WS].start, null, [new CallEffect(WS, afterWS)])
-        start = afterWS
+      let next = end, to = next, cur = expr.exprs[i]
+      if (i < expr.exprs.length - 1) {
+        next = graph.node()
+        // FIXME inserting space too eagerly, probably should be a parameter to generateExpr
+        to = maybeSpaceBefore(next, graph)
       }
-      let to = i == expr.exprs.length - 1 ? end : graph.node()
-      generateExpr(start, to, expr.exprs[i], graph)
-      start = to
+      generateExpr(start, to, cur, graph)
+      start = next
     }
   } else if (t == "ChoiceMatch") {
     for (let i = 0; i < expr.exprs.length; i++)

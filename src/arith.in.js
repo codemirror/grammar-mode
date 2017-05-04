@@ -1,13 +1,12 @@
 grammar arith {
-  rules {
-    Expr { (num | var | '(' Expr ')') (op Expr)? }
+  with(space) {
+    Expr { (num | var | ParenExpr) (op Expr)? }
+    ParenExpr* { '(' Expr ')' }
   }
   tokens {
-    num { '0'-'9'+ }
-    var { 'a'-'z'+ }
-  }
-  helpers {
+    num="number" { '0'-'9'+ }
+    var="variable" { 'a'-'z'+ }
     op { '+' | '-' | '/' | '*' }
   }
-  whitespace { (' ' | '\t' | '\n')* }
+  space { (' ' | '\t' | '\n')* }
 }
