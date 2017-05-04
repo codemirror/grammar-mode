@@ -274,11 +274,11 @@ function generateExpr(start, end, expr, graph) {
       graph.edge(start, end)
       generateExpr(end, maybeSpaceBefore(end, graph), expr.expr, graph)
     } else if (expr.kind == "+") {
-      generateExpr(start, end, expr.expr, graph)
+      generateExpr(start, maybeSpaceBefore(end, graph), expr.expr, graph)
       generateExpr(end, maybeSpaceBefore(end, graph), expr.expr, graph)
     } else if (expr.kind == "?") {
       graph.edge(start, end)
-      generateExpr(start, maybeSpaceBefore(end, graph), expr.expr, graph)
+      generateExpr(start, end, expr.expr, graph)
     }
   } else if (t == "LookaheadMatch") {
     throw new Error("not supporting lookahead yet")
@@ -287,7 +287,6 @@ function generateExpr(start, end, expr, graph) {
       let next = end, to = next, cur = expr.exprs[i]
       if (i < expr.exprs.length - 1) {
         next = graph.node()
-        // FIXME inserting space too eagerly, probably should be a parameter to generateExpr
         to = maybeSpaceBefore(next, graph)
       }
       generateExpr(start, to, cur, graph)
