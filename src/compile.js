@@ -16,23 +16,29 @@ class Graph {
     this.first = null
     for (let name in grammar.rules) {
       if (this.first == null) this.first = name
-      this.rules[name] = {ast: grammar.rules[name], start: this.node(name)}
+      this.rules[name] = {ast: grammar.rules[name], start: null}
     }
+    if (!this.first) throw new SyntaxError("Empty grammar")
+    this.getRule(this.first)
+  }
 
-    for (let n in this.rules) {
-      let {ast, start} = this.rules[n]
-      this.withRule(ast, () => {
+  getRule(name) {
+    let rule = this.rules[name]
+    if (!rule.start) {
+      rule.start = this.node(name)
+      this.withRule(rule.ast, () => {
         let end = this.node(null, "end")
-        generateExpr(start, end, ast.expr, this)
-        if (ast.value) {
-          let push = new PushContext(ast.id.name, ast.value)
-          this.nodes[start].forEach(edge => edge.effects.unshift(push))
+        generateExpr(rule.start, end, rule.ast.expr, this)
+        if (rule.ast.value) {
+          let push = new PushContext(name, rule.ast.value)
+          this.nodes[rule.start].forEach(edge => edge.effects.unshift(push))
           this.edge(end, null, null, [popContext, returnEffect])
         } else {
           this.edge(end, null, null, [returnEffect])
         }
       })
     }
+    return rule
   }
 
   node(base, suffix) {
@@ -216,7 +222,7 @@ const popContext = new class PopContext {
 function maybeSpaceBefore(node, graph) {
   let withSpace = graph.curRule.withSpace
   if (!withSpace) return node
-  let space = graph.rules[withSpace.name]
+  let space = graph.getRule(withSpace.name)
   if (!space) throw new SyntaxError(`Missing space rule for '${withSpace.name}'`)
   let before = graph.node()
   graph.edge(before, node, null, [new CallEffect(withSpace.name, before)])
@@ -232,7 +238,7 @@ function generateExpr(start, end, expr, graph) {
   } else if (t == "AnyMatch") {
     graph.edge(start, end, anyMatch)
   } else if (t == "RuleIdentifier") {
-    let rule = graph.rules[expr.id.name]
+    let rule = graph.getRule(expr.id.name)
     if (!rule) throw new SyntaxError(`No rule '${expr.id.name}' defined`)
     graph.edge(start, rule.start, null, [new CallEffect(expr.id.name, end)])
   } else if (t == "RepeatedMatch") {
