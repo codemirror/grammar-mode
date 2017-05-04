@@ -16,26 +16,45 @@ class Graph {
     this.first = null
     for (let name in grammar.rules) {
       if (this.first == null) this.first = name
-      this.rules[name] = {ast: grammar.rules[name], start: null}
+      this.rules[name] = {ast: grammar.rules[name], start: null, end: null, uses: 0}
     }
     if (!this.first) throw new SyntaxError("Empty grammar")
+    for (let name in this.rules) {
+      let ast = this.rules[name].ast
+      if (ast.withSpace) this.useRule(ast.withSpace.name, 2)
+      forAllExprs(ast.expr, expr => {
+        if (expr.type == "RuleIdentifier") this.useRule(expr.id.name, 1)
+      })
+    }
     this.getRule(this.first)
+  }
+
+  useRule(name, n) {
+    let rule = this.rules[name]
+    if (!rule) throw new SyntaxError(`No rule '${name}' defined`)
+    rule.uses += n
   }
 
   getRule(name) {
     let rule = this.rules[name]
     if (!rule.start) {
-      rule.start = this.node(name)
       this.withRule(rule.ast, () => {
-        let end = this.node(null, "end")
-        generateExpr(rule.start, end, rule.ast.expr, this)
+        rule.start = this.node()
+        rule.end = this.node(null, "end")
         if (rule.ast.value) {
           let push = new PushContext(name, rule.ast.value)
           this.nodes[rule.start].forEach(edge => edge.effects.unshift(push))
-          this.edge(end, null, null, [popContext, returnEffect])
-        } else {
-          this.edge(end, null, null, [returnEffect])
+          if (rule.uses > 1) {
+            this.edge(rule.end, null, null, [popContext, returnEffect])
+          } else {
+            let pop = this.node(null, "pop")
+            this.edge(rule.end, pop, null, [popContext])
+            rule.end = pop
+          }
+        } else if (rule.uses > 1) {
+          this.edge(rule.end, null, null, [returnEffect])
         }
+        generateExpr(rule.start, rule.end, rule.ast.expr, this)
       })
     }
     return rule
@@ -186,6 +205,12 @@ class RepeatMatch {
   toString() { return this.match.toString() + "*" }
 }
 
+function forAllExprs(e, f) {
+  f(e)
+  if (e.exprs) for (let i = 0; i < e.exprs.length; i++) forAllExprs(e.exprs[i], f)
+  if (e.expr) forAllExprs(e.expr, f)
+}
+
 class CallEffect {
   constructor(rule, returnTo) {
     this.rule = rule
@@ -239,8 +264,12 @@ function generateExpr(start, end, expr, graph) {
     graph.edge(start, end, anyMatch)
   } else if (t == "RuleIdentifier") {
     let rule = graph.getRule(expr.id.name)
-    if (!rule) throw new SyntaxError(`No rule '${expr.id.name}' defined`)
-    graph.edge(start, rule.start, null, [new CallEffect(expr.id.name, end)])
+    if (rule.uses == 1) {
+      graph.edge(start, rule.start)
+      graph.edge(rule.end, end)
+    } else {
+      graph.edge(start, rule.start, null, [new CallEffect(expr.id.name, end)])
+    }
   } else if (t == "RepeatedMatch") {
     if (expr.kind == "*") {
       graph.edge(start, end)
