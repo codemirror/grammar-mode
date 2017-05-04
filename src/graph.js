@@ -99,6 +99,15 @@ class Graph {
     for (let n in this.nodes) if (!(n in reached)) delete this.nodes[n]
   }
 
+  merge(a, b) {
+    delete this.nodes[b]
+    if (this.first == b) this.first = a
+    for (let node in this.nodes) {
+      let edges = this.nodes[node]
+      for (let i = 0; i < edges.length; i++) edges[i].merge(a, b)
+    }
+  }
+
   toString() {
     let output = "digraph {\n"
     for (let node in this.nodes) {
@@ -110,11 +119,26 @@ class Graph {
   }
 }
 
+function eqArray(a, b) {
+  if (a.length != b.length) return false
+  for (let i = 0; i < a.length; i++) if (!a[i].eq(b[i])) return false
+  return true
+}
+
 class Edge {
   constructor(to, match, effects) {
     this.to = to
     this.match = match
     this.effects = effects || []
+  }
+
+  eq(other) {
+    return this.to == other.to && this.match.eq(other.match) && eqArray(this.effects, other.effects)
+  }
+
+  merge(a, b) {
+    if (this.to == b) this.to = a
+    for (let i = 0; i < this.effects.length; i++) this.effects[i].merge(a, b)
   }
 
   toString(from) {
@@ -131,6 +155,8 @@ class StringMatch {
   toString() { return JSON.stringify(this.string) }
 
   get isNull() { return false }
+
+  eq(other) { return other instanceof StringMatch && other.string == this.string }
 }
 
 class RangeMatch {
@@ -142,16 +168,20 @@ class RangeMatch {
   toString() { return JSON.stringify(this.from) + "-" + JSON.stringify(this.to) }
 
   get isNull() { return false }
+
+  eq(other) { return other instanceof RangeMatch && other.from == this.from && other.to == this.to }
 }
 
 const anyMatch = new class AnyMatch {
   toString() { return "_" }
   get isNull() { return false }
+  eq(other) { return other == anyMatch }
 }
 
 const nullMatch = new class NullMatch {
   toString() { return "ø" }
   get isNull() { return true }
+  eq(other) { return other == anyMatch }
 }
 
 class SeqMatch {
@@ -162,6 +192,8 @@ class SeqMatch {
   toString() { return this.matches.join(" ") }
 
   get isNull() { return this.matches.every(m => m.isNull) }
+
+  eq(other) { return other instanceof SeqMatch && eqArray(other.matches, this.matches) }
 
   static create(left, right) {
     if (left == nullMatch) return right
@@ -188,6 +220,8 @@ class ChoiceMatch {
 
   get isNull() { return false }
 
+  eq(other) { return other instanceof ChoiceMatch && eqArray(other.matches, this.matches) }
+
   static create(left, right) {
     let matches = []
     if (left instanceof ChoiceMatch) matches = matches.concat(left.matches)
@@ -204,6 +238,8 @@ class RepeatMatch {
   }
 
   toString() { return this.match.toString() + "*" }
+
+  eq(other) { return other instanceof RepeatMatch && this.match.eq(other.match) }
 }
 
 function forAllExprs(e, f) {
@@ -222,11 +258,15 @@ class CallEffect {
     return other instanceof CallEffect && other.rule == this.rule && other.returnTo == this.returnTo
   }
 
+  merge(a, b) { if (this.returnTo == b) this.returnTo = a }
+
   toString() { return `call ${this.rule} -> ${this.returnTo}` }
 }
 
 const returnEffect = new class ReturnEffect {
   eq(other) { return other == this }
+
+  merge() {}
 
   toString() { return "return" }
 }
@@ -237,11 +277,13 @@ class PushContext {
     this.value = value
   }
   eq(other) { return other instanceof PushContext && other.name == this.name }
+  merge() {}
   toString() { return `push ${this.name}` }
 }
 
 const popContext = new class PopContext {
   eq(other) { return other == this }
+  merge() {}
   toString() { return "pop" }
 }
 
@@ -388,9 +430,27 @@ function simplify(graph) {
   while (simplifyWith(graph, [simplifyChoice, simplifyRepeat, simplifySequence])) {}
 }
 
+function mergeDuplicates(graph) {
+  outer: for (;;) {
+    let names = Object.keys(graph.nodes)
+    for (let i = 0; i < names.length; i++) {
+      let name = names[i], edges = graph.nodes[name]
+      for (let j = i + 1; j < names.length; j++) {
+        let otherName = names[j]
+        if (eqArray(edges, graph.nodes[otherName])) {
+          graph.merge(name, otherName)
+          continue outer
+        }
+      }
+    }
+    break
+  }
+}
+
 module.exports = function(grammar) {
   let graph = new Graph(grammar)
   simplify(graph)
+  mergeDuplicates(graph)
   graph.gc()
   return graph
 }
