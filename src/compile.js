@@ -21,7 +21,7 @@ class Graph {
     if (!this.first) throw new SyntaxError("Empty grammar")
     for (let name in this.rules) {
       let ast = this.rules[name].ast
-      if (ast.withSpace) this.useRule(ast.withSpace.name, 2)
+      if (ast.space) this.useRule(ast.space.name, 2)
       forAllExprs(ast.expr, expr => {
         if (expr.type == "RuleIdentifier") this.useRule(expr.id.name, 1)
       })
@@ -40,21 +40,22 @@ class Graph {
     if (!rule.start) {
       this.withRule(rule.ast, () => {
         rule.start = this.node()
-        rule.end = this.node(null, "end")
+        let end = rule.end = this.node(null, "end")
         if (rule.ast.value) {
-          let push = new PushContext(name, rule.ast.value)
-          this.nodes[rule.start].forEach(edge => edge.effects.unshift(push))
           if (rule.uses > 1) {
-            this.edge(rule.end, null, null, [popContext, returnEffect])
+            this.edge(end, null, null, [popContext, returnEffect])
           } else {
-            let pop = this.node(null, "pop")
-            this.edge(rule.end, pop, null, [popContext])
-            rule.end = pop
+            rule.end = this.node(null, "pop")
+            this.edge(end, rule.end, null, [popContext])
           }
         } else if (rule.uses > 1) {
           this.edge(rule.end, null, null, [returnEffect])
         }
-        generateExpr(rule.start, rule.end, rule.ast.expr, this)
+        generateExpr(rule.start, end, rule.ast.expr, this)
+        if (rule.ast.value) {
+          let push = new PushContext(name, rule.ast.value)
+          this.nodes[rule.start].forEach(edge => edge.effects.unshift(push))
+        }
       })
     }
     return rule
@@ -245,12 +246,10 @@ const popContext = new class PopContext {
 }
 
 function maybeSpaceBefore(node, graph) {
-  let withSpace = graph.curRule.withSpace
+  let withSpace = graph.curRule.space
   if (!withSpace) return node
-  let space = graph.getRule(withSpace.name)
-  if (!space) throw new SyntaxError(`Missing space rule for '${withSpace.name}'`)
-  let before = graph.node()
-  graph.edge(before, node, null, [new CallEffect(withSpace.name, before)])
+  let space = graph.getRule(withSpace.name), before = graph.node()
+  graph.edge(before, space.start, null, [new CallEffect(withSpace.name, node)])
   return before
 }
 
@@ -387,7 +386,7 @@ function simplifyWith(graph, simplifiers) {
 }
 
 function simplify(graph) {
-  while (simplifyWith(graph, [simplifySequence, simplifyChoice, simplifyRepeat])) {}
+  while (simplifyWith(graph, [simplifyChoice, simplifyRepeat, simplifySequence])) {}
 }
 
 function printGraph(graph) {
