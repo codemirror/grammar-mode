@@ -5,20 +5,32 @@ class Graph {
     this.nodes = Object.create(null)
     this.curRule = null
     this.rules = Object.create(null)
-    this.first = null
+    let first = null
     for (let name in grammar.rules) {
-      if (this.first == null) this.first = name
-      this.rules[name] = {ast: grammar.rules[name], start: null, end: null, uses: 0}
+      if (first == null) first = name
+      let ast = grammar.rules[name]
+      this.rules[name] = {name,
+                          value: ast.value,
+                          space: ast.space && ast.space.name,
+                          expr: ast.expr,
+                          start: null, end: null,
+                          uses: 0}
     }
-    if (!this.first) throw new SyntaxError("Empty grammar")
+    if (!first) throw new SyntaxError("Empty grammar")
     for (let name in this.rules) {
-      let ast = this.rules[name].ast
-      if (ast.space) this.useRule(ast.space.name, 2)
-      forAllExprs(ast.expr, expr => {
+      let rule = this.rules[name]
+      if (rule.space) this.useRule(rule.space, 2)
+      forAllExprs(rule.expr, expr => {
         if (expr.type == "RuleIdentifier") this.useRule(expr.id.name, 1)
       })
     }
-    this.getRule(this.first)
+    if (this.rules.START) {
+      this.useRule("START", 1)
+      this.getRule("START")
+    } else {
+      this.useRule(first, 1)
+      this.buildStartRule(first)
+    }
   }
 
   useRule(name, n) {
@@ -30,10 +42,10 @@ class Graph {
   getRule(name) {
     let rule = this.rules[name]
     if (!rule.start) {
-      this.withRule(rule.ast, () => {
+      this.withRule(rule, () => {
         rule.start = this.node()
         let end = rule.end = this.node(null, "end")
-        if (rule.ast.value) {
+        if (rule.value) {
           if (rule.uses > 1) {
             this.edge(end, null, null, [popContext, returnEffect])
           } else {
@@ -43,9 +55,9 @@ class Graph {
         } else if (rule.uses > 1) {
           this.edge(rule.end, null, null, [returnEffect])
         }
-        generateExpr(rule.start, end, rule.ast.expr, this)
-        if (rule.ast.value) {
-          let push = new PushContext(name, rule.ast.value)
+        generateExpr(rule.start, end, rule.expr, this)
+        if (rule.value) {
+          let push = new PushContext(name, rule.value)
           this.nodes[rule.start].forEach(edge => edge.effects.unshift(push))
         }
       })
@@ -54,7 +66,7 @@ class Graph {
   }
 
   node(base, suffix) {
-    let label = (base || this.curRule.id.name) + (suffix ? "_" + suffix : "")
+    let label = (base || this.curRule.name) + (suffix ? "_" + suffix : "")
     for (let i = 0;; i++) {
       let cur = i ? label + "_" + i : label
       if (!(cur in this.nodes)) {
@@ -85,7 +97,7 @@ class Graph {
       reached[node] = true
       work.push(node)
     }
-    reach(this.rules[this.first].start)
+    reach(this.rules.START.start)
 
     while (work.length) {
       let next = this.nodes[work.pop()]
@@ -101,9 +113,27 @@ class Graph {
     for (let n in this.nodes) if (!(n in reached)) delete this.nodes[n]
   }
 
+  buildStartRule(first) {
+    let rule = this.rules.START = {
+      name: "START",
+      value: null,
+      space: this.rules[first].space,
+      expr: null,
+      start: this.node("START"),
+      end: null,
+      uses: 1
+    }
+    let cur = rule.start, space = this.getRule(rule.space)
+    if (space) {
+      let next = this.node("START")
+      this.edge(cur, space.start, null, [new CallEffect(rule.space, next)])
+      cur = next
+    }
+    callRule(cur, rule.start, first, this)
+  }
+
   merge(a, b) {
     delete this.nodes[b]
-    if (this.first == b) this.first = a
     for (let node in this.nodes) {
       let edges = this.nodes[node]
       for (let i = 0; i < edges.length; i++) edges[i].merge(a, b)
@@ -146,7 +176,10 @@ class Edge {
 function forAllExprs(e, f) {
   f(e)
   if (e.exprs) for (let i = 0; i < e.exprs.length; i++) forAllExprs(e.exprs[i], f)
-  if (e.expr) forAllExprs(e.expr, f)
+  if (e.expr) {
+    forAllExprs(e.expr, f)
+    if (e.type == "+") forAllExprs(e.expr, f) // The body of + is duplicated
+  }
 }
 
 class CallEffect {
@@ -191,9 +224,19 @@ const popContext = new class PopContext {
 function maybeSpaceBefore(node, graph) {
   let withSpace = graph.curRule.space
   if (!withSpace) return node
-  let space = graph.getRule(withSpace.name), before = graph.node()
-  graph.edge(before, space.start, null, [new CallEffect(withSpace.name, node)])
+  let space = graph.getRule(withSpace), before = graph.node()
+  graph.edge(before, space.start, null, [new CallEffect(withSpace, node)])
   return before
+}
+
+function callRule(start, end, name, graph) {
+  let rule = graph.getRule(name)
+  if (rule.uses == 1) {
+    graph.edge(start, rule.start)
+    graph.edge(rule.end, end)
+  } else {
+    graph.edge(start, rule.start, null, [new CallEffect(name, end)])
+  }
 }
 
 function generateExpr(start, end, expr, graph) {
@@ -218,13 +261,7 @@ function generateExpr(start, end, expr, graph) {
   } else if (t == "AnyMatch") {
     graph.edge(start, end, anyMatch)
   } else if (t == "RuleIdentifier") {
-    let rule = graph.getRule(expr.id.name)
-    if (rule.uses == 1) {
-      graph.edge(start, rule.start)
-      graph.edge(rule.end, end)
-    } else {
-      graph.edge(start, rule.start, null, [new CallEffect(expr.id.name, end)])
-    }
+    callRule(start, end, expr.id.name, graph)
   } else if (t == "RepeatedMatch") {
     if (expr.kind == "*") {
       graph.edge(start, end)
