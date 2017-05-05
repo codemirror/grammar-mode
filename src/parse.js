@@ -56,9 +56,9 @@ function parseExprInner(p) {
   } else if (p.type == tt.string) {
     let node = p.startNode(), value = p.value
     p.next()
-    if (p.type == tt.plusMin && p.value == "-") {
+    if (p.type == tt.plusMin && p.value == "-" && value.length == 1) {
       p.next()
-      if (p.type != tt.string) p.unexpected()
+      if (p.type != tt.string || p.value.length != 1) p.unexpected()
       node.from = value
       node.to = p.value
       p.next()

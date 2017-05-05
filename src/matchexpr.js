@@ -1,15 +1,23 @@
+function escRe(str) {
+  return str.replace(/[^\w ]/g, ch => {
+    if (ch == "\n") return "\\n"
+    if (ch == "\t") return "\\t"
+    return "\\" + ch
+  })
+}
+
 class StringMatch {
   constructor(string) {
     this.string = string
   }
-
-  toString() { return JSON.stringify(this.string) }
 
   get isNull() { return false }
 
   get matchesNewline() { return this.string == "\n" }
 
   eq(other) { return other instanceof StringMatch && other.string == this.string }
+
+  regexp() { return escRe(this.string) }
 }
 exports.StringMatch = StringMatch
 
@@ -19,28 +27,28 @@ class RangeMatch {
     this.to = to
   }
 
-  toString() { return JSON.stringify(this.from) + "-" + JSON.stringify(this.to) }
-
   get isNull() { return false }
 
   get matchesNewline() { return this.from <= "\n" && this.to >= "\n" }
 
   eq(other) { return other instanceof RangeMatch && other.from == this.from && other.to == this.to }
+
+  regexp() { return "[" + escRe(this.from) + "-" + escRe(this.to) + "]" }
 }
 exports.RangeMatch = RangeMatch
 
 const anyMatch = exports.anyMatch = new class AnyMatch {
-  toString() { return "_" }
   get isNull() { return false }
   get matchesNewline() { return true }
   eq(other) { return other == anyMatch }
+  regexp() { return "." }
 }
 
 const nullMatch = exports.nullMatch = new class NullMatch {
-  toString() { return "ø" }
   get isNull() { return true }
   get matchesNewline() { return false }
   eq(other) { return other == anyMatch }
+  regexp() { return "" }
 }
 
 class SeqMatch {
@@ -48,13 +56,13 @@ class SeqMatch {
     this.matches = matches
   }
 
-  toString() { return this.matches.join(" ") }
-
   get isNull() { return false }
 
   get matchesNewline() { return false }
 
   eq(other) { return other instanceof SeqMatch && eqArray(other.matches, this.matches) }
+
+  regexp() { return this.matches.map(m => m.regexp()).join("") }
 
   static create(left, right) {
     if (left == nullMatch) return right
@@ -78,13 +86,28 @@ class ChoiceMatch {
     this.matches = matches
   }
 
-  toString() { return "(" + this.matches.join(" | ") + ")" }
-
   get isNull() { return false }
 
   get matchesNewline() { return false }
 
   eq(other) { return other instanceof ChoiceMatch && eqArray(other.matches, this.matches) }
+
+  regexp() {
+    let set = ""
+    for (let i = 0; i < this.matches.length; i++) {
+      let match = this.matches[i]
+      if (match instanceof StringMatch && match.string.length == 1) {
+        set += escRe(match.string)
+      } else if (match instanceof RangeMatch) {
+        set += escRe(match.from) + "-" + escRe(match.to)
+      } else {
+        set = null
+        break
+      }
+    }
+    if (set != null) return "[" + set + "]"
+    return "(?:" + this.matches.map(m => m.regexp()).join("|") + ")"
+  }
 
   static create(left, right) {
     let matches = []
@@ -102,13 +125,16 @@ class RepeatMatch {
     this.match = match
   }
 
-  toString() { return this.match.toString() + "*" }
-
   get isNull() { return false }
 
   get matchesNewline() { return false }
 
   eq(other) { return other instanceof RepeatMatch && this.match.eq(other.match) }
+
+  regexp() {
+    if (this.match instanceof SeqMatch) return "(" + this.match.regexp() + ")*"
+    else return this.match.regexp() + "*"
+  }
 }
 exports.RepeatMatch = RepeatMatch
 

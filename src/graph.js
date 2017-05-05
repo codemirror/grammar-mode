@@ -139,7 +139,7 @@ class Edge {
 
   toString(from) {
     let effects = this.effects.length ? " " + this.effects.join(" ") : ""
-    return `${from} -> ${this.to || "NULL"}[label=${JSON.stringify(this.match.toString() + effects)}]`
+    return `${from} -> ${this.to || "NULL"}[label=${JSON.stringify(this.match.regexp() + effects)}]`
   }
 }
 
@@ -314,7 +314,7 @@ function simplifyRepeat(graph, node, edges) {
   let cycleIndex, cycleEdge
   for (let i = 0; i < edges.length; i++) {
     let edge = edges[i]
-    if (edge.to == node && !edge.match.matchesNewline) {
+    if (edge.to == node && !edge.match.matchesNewline && !edge.isNull) {
       if (cycleEdge) return false
       cycleIndex = i
       cycleEdge = edge
