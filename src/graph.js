@@ -1,4 +1,4 @@
-const {nullMatch, anyMatch, StringMatch, RangeMatch, SeqMatch, ChoiceMatch, RepeatMatch} = require("./matchexpr")
+const {nullMatch, anyMatch, StringMatch, RangeMatch, SeqMatch, ChoiceMatch, RepeatMatch, eqArray} = require("./matchexpr")
 
 class Graph {
   constructor(grammar) {
@@ -121,12 +121,6 @@ class Graph {
   }
 }
 
-function eqArray(a, b) {
-  if (a.length != b.length) return false
-  for (let i = 0; i < a.length; i++) if (!a[i].eq(b[i])) return false
-  return true
-}
-
 class Edge {
   constructor(to, match, effects) {
     this.to = to
@@ -207,7 +201,20 @@ function generateExpr(start, end, expr, graph) {
   if (t == "CharacterRange") {
     graph.edge(start, end, new RangeMatch(expr.from, expr.to))
   } else if (t == "StringMatch") {
-    graph.edge(start, end, new StringMatch(expr.value))
+    let separated = expr.value.split(/\n\r?|\r/)
+    for (let i = 0; i < separated.length - 1; i++) {
+      let line = separated[i]
+      if (line) {
+        let after = graph.node()
+        graph.edge(start, after, new StringMatch(line))
+        start = after
+      }
+      let after = graph.node()
+      graph.edge(start, after, new StringMatch("\n"))
+      start = after
+    }
+    let last = separated[separated.length - 1]
+    graph.edge(start, end, last ? new StringMatch(last) : nullMatch)
   } else if (t == "AnyMatch") {
     graph.edge(start, end, anyMatch)
   } else if (t == "RuleIdentifier") {
@@ -252,9 +259,10 @@ function generateExpr(start, end, expr, graph) {
 function simplifySequence(graph, node, edges) {
   for (let i = 0; i < edges.length; i++) {
     let first = edges[i], next
-    if (first.to == node || !first.to || (next = graph.nodes[first.to]).length != 1) continue
+    if (first.to == node || !first.to || first.match.matchesNewline ||
+        (next = graph.nodes[first.to]).length != 1) continue
     let second = next[0], end = second.to, effects
-    if (end == first.to ||
+    if (end == first.to || second.match.matchesNewline ||
         (!first.match.isNull && second.effects.some(e => e instanceof PushContext)) ||
         (!second.match.isNull && first.effects.indexOf(popContext) > -1))
       continue
@@ -285,10 +293,10 @@ function sameEffect(edge1, edge2) {
 function simplifyChoice(graph, node, edges) {
   for (let i = 0; i < edges.length; i++) {
     let edge = edges[i], set
-    if (edge.match.isNull) continue
+    if (edge.match.isNull || edge.match.matchesNewline) continue
     for (let j = i + 1; j < edges.length; j++) {
       let other = edges[j]
-      if (other.to == edge.to && sameEffect(edge, other) && !other.match.isNull)
+      if (other.to == edge.to && sameEffect(edge, other) && !other.match.isNull && !other.match.matchesNewline)
         (set || (set = [edge])).push(other)
     }
     if (set) {
@@ -306,7 +314,7 @@ function simplifyRepeat(graph, node, edges) {
   let cycleIndex, cycleEdge
   for (let i = 0; i < edges.length; i++) {
     let edge = edges[i]
-    if (edge.to == node) {
+    if (edge.to == node && !edge.match.matchesNewline) {
       if (cycleEdge) return false
       cycleIndex = i
       cycleEdge = edge

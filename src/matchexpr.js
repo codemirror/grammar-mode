@@ -7,6 +7,8 @@ class StringMatch {
 
   get isNull() { return false }
 
+  get matchesNewline() { return this.string == "\n" }
+
   eq(other) { return other instanceof StringMatch && other.string == this.string }
 }
 exports.StringMatch = StringMatch
@@ -21,6 +23,8 @@ class RangeMatch {
 
   get isNull() { return false }
 
+  get matchesNewline() { return this.from <= "\n" && this.to >= "\n" }
+
   eq(other) { return other instanceof RangeMatch && other.from == this.from && other.to == this.to }
 }
 exports.RangeMatch = RangeMatch
@@ -28,12 +32,14 @@ exports.RangeMatch = RangeMatch
 const anyMatch = exports.anyMatch = new class AnyMatch {
   toString() { return "_" }
   get isNull() { return false }
+  get matchesNewline() { return true }
   eq(other) { return other == anyMatch }
 }
 
 const nullMatch = exports.nullMatch = new class NullMatch {
   toString() { return "ø" }
   get isNull() { return true }
+  get matchesNewline() { return false }
   eq(other) { return other == anyMatch }
 }
 
@@ -44,7 +50,9 @@ class SeqMatch {
 
   toString() { return this.matches.join(" ") }
 
-  get isNull() { return this.matches.every(m => m.isNull) }
+  get isNull() { return false }
+
+  get matchesNewline() { return false }
 
   eq(other) { return other instanceof SeqMatch && eqArray(other.matches, this.matches) }
 
@@ -74,6 +82,8 @@ class ChoiceMatch {
 
   get isNull() { return false }
 
+  get matchesNewline() { return false }
+
   eq(other) { return other instanceof ChoiceMatch && eqArray(other.matches, this.matches) }
 
   static create(left, right) {
@@ -93,6 +103,10 @@ class RepeatMatch {
   }
 
   toString() { return this.match.toString() + "*" }
+
+  get isNull() { return false }
+
+  get matchesNewline() { return false }
 
   eq(other) { return other instanceof RepeatMatch && this.match.eq(other.match) }
 }
