@@ -43,22 +43,22 @@ class Graph {
     let rule = this.rules[name]
     if (!rule.start) {
       this.withRule(rule, () => {
-        rule.start = this.node()
+        let start = rule.start = this.node()
         let end = rule.end = this.node(null, "end")
         if (rule.value) {
-          if (rule.uses > 1) {
+          let push = this.node(null, "push")
+          this.edge(start, push, null, [new PushContext(name, rule.value)])
+          start = push
+          if (rule.uses == 1) end = this.node()
+        }
+        generateExpr(start, end, rule.expr, this)
+        if (rule.value) {
+          if (rule.uses > 1)
             this.edge(end, null, null, [popContext, returnEffect])
-          } else {
-            rule.end = this.node(null, "pop")
+          else
             this.edge(end, rule.end, null, [popContext])
-          }
         } else if (rule.uses > 1) {
           this.edge(rule.end, null, null, [returnEffect])
-        }
-        generateExpr(rule.start, end, rule.expr, this)
-        if (rule.value) {
-          let push = new PushContext(name, rule.value)
-          this.nodes[rule.start].forEach(edge => edge.effects.unshift(push))
         }
       })
     }
@@ -182,7 +182,7 @@ function forAllExprs(e, f) {
   }
 }
 
-class CallEffect {
+const CallEffect = exports.CallEffect = class {
   constructor(rule, returnTo) {
     this.rule = rule
     this.returnTo = returnTo
@@ -197,7 +197,7 @@ class CallEffect {
   toString() { return `call ${this.rule} -> ${this.returnTo}` }
 }
 
-const returnEffect = new class ReturnEffect {
+const returnEffect = exports.returnEffect = new class ReturnEffect {
   eq(other) { return other == this }
 
   merge() {}
@@ -205,7 +205,7 @@ const returnEffect = new class ReturnEffect {
   toString() { return "return" }
 }
 
-class PushContext {
+const PushContext = exports.PushContext = class {
   constructor(name, value) {
     this.name = name
     this.value = value
@@ -215,7 +215,7 @@ class PushContext {
   toString() { return `push ${this.name}` }
 }
 
-const popContext = new class PopContext {
+const popContext = exports.popContext = new class PopContext {
   eq(other) { return other == this }
   merge() {}
   toString() { return "pop" }
@@ -270,8 +270,8 @@ function generateExpr(start, end, expr, graph) {
       generateExpr(start, maybeSpaceBefore(end, graph), expr.expr, graph)
       generateExpr(end, maybeSpaceBefore(end, graph), expr.expr, graph)
     } else if (expr.kind == "?") {
-      graph.edge(start, end)
       generateExpr(start, end, expr.expr, graph)
+      graph.edge(start, end)
     }
   } else if (t == "LookaheadMatch") {
     throw new Error("not supporting lookahead yet")
@@ -399,7 +399,7 @@ function mergeDuplicates(graph) {
   }
 }
 
-module.exports = function(grammar) {
+exports.buildGraph = function(grammar) {
   let graph = new Graph(grammar)
   simplify(graph)
   mergeDuplicates(graph)

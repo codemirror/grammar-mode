@@ -1,6 +1,6 @@
 const parse = require("./parse")
-const buildGraph = require("./graph")
-const {nullMatch, StringMatch} = require("./matchexpr")
+const {buildGraph, CallEffect, PushContext, popContext} = require("./graph")
+const {nullMatch} = require("./matchexpr")
 
 module.exports = function(file, showGraph) {
   let ast = parse(file), result = file
@@ -15,28 +15,49 @@ module.exports = function(file, showGraph) {
 }
 
 function compileEdge(edge) {
-  let code = "function(stream, state) {\n", match = edge.match
-  if (match instanceof StringMatch) {
-    if (match.matchesNewline)
-      code += "if (!stream.sol()) return F;\n"
-    else
-      code += `if (!stream.match(/${JSON.stringify(match.string)}/)) return F;\n`
-  } else if (match != nullMatch) {
-    code += `if (!stream.match(/^(?:${match.regexp()})/)) return F;\n`
+  let match = "null", body = ""
+  if (edge.match != nullMatch)
+    match = `/^(?:${edge.match.regexp()})/${edge.match.matchesNewline ? "m" : ""}`
+  let saveContext = false
+  for (let i = 0; i < edge.effects.length; i++) {
+    let effect = edge.effects[i]
+    if (effect instanceof CallEffect) {
+      body += `  state.stack[state.stack.length] = ${effect.returnTo}\n`
+    } else if (effect == popContext) {
+      if (saveContext) { body += `  state.tokenContext = state.context\n`; saveContext = false }
+      body += `  state.context = state.context.prev\n`
+    } else if (effect instanceof PushContext) {
+      body += `  state.pushContext(${JSON.stringify(effect.name)}${!effect.value ? "" : ", " + JSON.stringify(effect.value)})\n`
+      saveContext = true
+    }
   }
-  code += "return state.context;\n}"
-  return code
+  if (saveContext)
+    body += `  state.tokenContext = state.context\n`
+  if (edge.to)
+    body += `  state.stack[state.stack.length] = ${edge.to}\n`
+
+  return match + ", " + (body ? "function(state) {\n" + body + "}" : needNoop = "noop")
 }
+
+let needNoop = false
 
 function compileGrammar(grammar) {
   let graph = buildGraph(grammar)
 
-  let code = `var ${grammar.id.name} = function() {\n`
-  code += `var F = {};\n`
+  let code = `var ${grammar.id.name} = function() {\n`, nodes = []
+  needNoop = false
+
   for (let name in graph.nodes) {
     let edges = graph.nodes[name]
-    code += `var ${name} = [${edges.map(compileEdge).join(", ")}];\n`
+    nodes.push(`${name} = [${edges.map(compileEdge).join(",\n")}]`)
   }
+  code += `var ${nodes.join(",\n")}\n`
+
+  if (needNoop) code += `function noop(){}\n`
+
+  code += require("fs").readFileSync(__dirname + "/matcher.js", "utf8")
+
+  code += `return new GrammarMode(${graph.rules.START.start})\n`
 
   return code + "}();\n"
 }

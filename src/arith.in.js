@@ -1,3 +1,5 @@
+const CodeMirror = require("codemirror")
+
 grammar arith {
   with(space) {
     Expr { (num | var | ParenExpr) (op Expr)? }
@@ -10,3 +12,5 @@ grammar arith {
   }
   space { (' ' | '\t' | '\n')* }
 }
+
+CodeMirror.defineMode("arith", () => arith)
