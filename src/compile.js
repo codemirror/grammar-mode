@@ -20,10 +20,16 @@ function compileEdge(edge) {
     match = `/^(?:${edge.match.regexp()})/${edge.match.matchesNewline ? "m" : ""}`
   for (let i = 0; i < edge.effects.length; i++) {
     let effect = edge.effects[i]
-    if (effect instanceof CallEffect)
+    if (effect instanceof CallEffect) {
+      let next = edge.effects[i + 1]
+      if (next && next instanceof PushContext && next.name == effect.rule) {
+        body += `  state.pushContext(${JSON.stringify(next.name)}${!next.value ? "" : ", " + JSON.stringify(next.value)})\n`
+        i++
+      }
       body += `  state.push(${effect.returnTo})\n`
-    else if (effect instanceof PushContext)
+    } else if (effect instanceof PushContext) {
       body += `  state.pushContext(${JSON.stringify(effect.name)}${!effect.value ? "" : ", " + JSON.stringify(effect.value)})\n`
+    }
   }
   if (edge.to)
     body += `  state.push(${edge.to})\n`
@@ -41,7 +47,7 @@ function compileGrammar(grammar) {
 
   for (let name in graph.nodes) {
     let edges = graph.nodes[name]
-    nodes.push(`${name} = [${edges.map(compileEdge).join(",\n")}]`)
+    nodes.push(`${name} = [${JSON.stringify(name)},\n${edges.map(compileEdge).join(",\n")}]`)
   }
   code += `var ${nodes.join(",\n")}\n`
 

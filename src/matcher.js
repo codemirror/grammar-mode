@@ -24,7 +24,7 @@ class LineEndStream {
 }
 
 function matchEdge(node, stream) {
-  for (let i = 0; i < node.length; i += 2) {
+  for (let i = 1; i < node.length; i += 2) {
     let match = node[i]
     if (!match || stream.match(match)) return node[i + 1]
   }
@@ -36,36 +36,59 @@ class State {
     this.context = context
   }
 
-  popContext(depth) {
-    while (this.context && this.context.depth > depth)
-      this.context = this.context.parent
+  forward(stream) {
+    for (;;) {
+      let edge = matchEdge(this.stack[this.stack.length - 1], stream)
+      if (!edge) return false
+      this.stack.pop()
+      this.popContext()
+      edge(this)
+      if (stream.pos > stream.start) return true
+    }
   }
 
-  forward(stream) {
-    this.popContext(this.stack.length - 1)
+  forwardAndUnwind(stream) {
     for (let depth = this.stack.length - 1;;) {
       let edge = matchEdge(this.stack[depth], stream)
       if (edge) {
-        this.stack.length = depth
-        this.popContext(depth - 1)
-        edge(this)
-        depth = this.stack.length - 1
-        if (stream.pos > stream.start) {
-          return this.context
+        let progress = stream.pos > stream.start
+        if (depth == this.stack.length - 1) {
+          // Regular continuation of the current state
+          this.stack.pop()
+        } else if (progress) {
+          // Unwinding some of the stack to continue after a mismatch.
+          // Can use this state object because we already know there's
+          // progress and we'll commit to this unwinding
+          this.stack.length = depth
         } else {
-          this.popContext(depth)
-          continue
+          // Speculatively forward with a copy of the state when
+          // encountering a null match during unwinding, since we only
+          // want to commit to it when it matches something
+          let copy = new State(this.stack.slice(0, depth), this.context)
+          if (copy.forward(stream)) {
+            this.stack = copy.stack
+            this.context = copy.context
+            return
+          } else {
+            continue
+          }
         }
+        this.popContext()
+        edge(this)
+        if (progress) return
+        depth = this.stack.length - 1
+      } else { // No matching edge, unwind if possible, match a generic token and try again otherwise
+        if (depth) depth--
+        else depth = this.stack.push(_TOKEN) - 1
       }
-      if (depth) depth--
-      else depth = this.stack.push(_TOKEN) - 1
     }
   }
 
   token(stream) {
-    let context = this.forward(stream)
-    if (stream.eol()) this.forward(new LineEndStream)
-    for (; context; context = context.prev)
+    this.forwardAndUnwind(stream)
+    let context = this.context
+    if (stream.eol()) this.forwardAndUnwind(new LineEndStream)
+    for (; context; context = context.parent)
       if (typeof context.value == "string") return context.value
   }
 
@@ -73,8 +96,13 @@ class State {
     this.stack[this.stack.length] = node
   }
 
-  pushContext(name, value) {
-    this.context = new Context(name, value, this.stack.length - 1, this.context)
+  pushContext(name, value, temporary) {
+    this.context = new Context(name, value, this.stack.length, this.context)
+  }
+
+  popContext(depth) {
+    while (this.context && this.stack.length <= this.context.depth)
+      this.context = this.context.parent
   }
 
   copy() {

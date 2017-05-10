@@ -22,10 +22,12 @@ class Graph {
     for (let name in this.rules) {
       let rule = this.rules[name]
       if (rule.space) this.useRule(rule.space, 2)
-      if (grammar.rules[name].isToken) {
+      let ast = grammar.rules[name]
+      if (ast.isToken) {
         this.useRule(name, 1)
         tokens.push(name)
       }
+      if (ast.value) this.useRule(name, 2)
       forAllExprs(rule.expr, expr => {
         if (expr.type == "RuleIdentifier") this.useRule(expr.id.name, 1)
       })
