@@ -1,6 +1,6 @@
 const parse = require("./parse")
 const {buildGraph, CallEffect, PushContext} = require("./graph")
-const {nullMatch} = require("./matchexpr")
+const {nullMatch, LookaheadMatch} = require("./matchexpr")
 
 module.exports = function(file, showGraph) {
   let ast = parse(file), result = file
@@ -15,9 +15,11 @@ module.exports = function(file, showGraph) {
 }
 
 function compileEdge(edge) {
-  let match = "null", body = ""
-  if (edge.match != nullMatch)
-    match = `/^(?:${edge.match.regexp()})/${edge.match.matchesNewline ? "m" : ""}`
+  let parts = [], body = ""
+  if (edge.match instanceof LookaheadMatch)
+    parts.push(`lookahead: ${JSON.stringify(edge.match.start)}, type: ${edge.match.positive ? `"~"` : `"!"`}`)
+  else if (edge.match != nullMatch)
+    parts.push(`match: /^(?:${edge.match.regexp()})/`)
   for (let i = 0; i < edge.effects.length; i++) {
     let effect = edge.effects[i]
     if (effect instanceof CallEffect) {
@@ -33,8 +35,8 @@ function compileEdge(edge) {
   }
   if (edge.to)
     body += `  state.push(${edge.to})\n`
-
-  return match + ", " + (body ? "function(state) {\n" + body + "}" : needNoop = "noop")
+  parts.push("apply: " + (body ? "function(state) {\n" + body + "}" : needNoop = "noop"))
+  return "{" + parts.join(", ") + "}"
 }
 
 let needNoop = false

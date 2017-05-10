@@ -13,20 +13,24 @@ class LineEndStream {
   }
 
   match(re) {
-    if (re.multiline) {
-      this.pos = 1
-      return true
-    }
-    return re.test("")
+    let match = re.exec("\n")
+    if (!match) return false
+    if (match[0].length) this.pos = 1
+    return true
   }
 
   get start() { return 0 }
 }
 
+function lookahead(edge, stream) {
+  throw new Error("FIXME")
+}
+
 function matchEdge(node, stream) {
-  for (let i = 1; i < node.length; i += 2) {
-    let match = node[i]
-    if (!match || stream.match(match)) return node[i + 1]
+  for (let i = 1; i < node.length; i++) {
+    let edge = node[i]
+    if (edge.lookahead ? lookahead(edge, stream) : edge.match ? stream.match(edge.match) : true)
+      return edge
   }
 }
 
@@ -42,7 +46,7 @@ class State {
       if (!edge) return false
       this.stack.pop()
       this.popContext()
-      edge(this)
+      edge.apply(this)
       if (stream.pos > stream.start) return true
     }
   }
@@ -74,7 +78,7 @@ class State {
           }
         }
         this.popContext()
-        edge(this)
+        edge.apply(this)
         if (progress) return
         depth = this.stack.length - 1
         continue

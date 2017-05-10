@@ -40,7 +40,7 @@ class Graph {
       this.useRule(first, 1)
       this.buildStartRule(first)
     }
-//    this.buildTokenRule(tokens)
+    this.buildTokenRule(tokens)
   }
 
   useRule(name, n) {
@@ -108,7 +108,7 @@ class Graph {
       work.push(node)
     }
     reach(this.rules.START.start)
-//    reach(this.rules._TOKEN.start)
+    reach(this.rules._TOKEN.start)
 
     while (work.length) {
       let next = this.nodes[work.pop()]
@@ -390,7 +390,7 @@ function simplifyRepeat(graph, node, edges) {
   return true
 }
 
-function simplifyLookahead(graph, node, edges) {
+function simplifyLookahead(graph, _node, edges) {
   for (let i = 0; i < edges.length; i++) {
     let edge = edges[i]
     if (!(edge.match instanceof LookaheadMatch)) continue
