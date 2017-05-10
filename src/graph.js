@@ -1,4 +1,5 @@
-const {nullMatch, anyMatch, StringMatch, RangeMatch, SeqMatch, ChoiceMatch, RepeatMatch, eqArray} = require("./matchexpr")
+const {nullMatch, anyMatch, StringMatch, RangeMatch, SeqMatch, ChoiceMatch, RepeatMatch,
+       LookaheadMatch, SimpleLookaheadMatch, eqArray} = require("./matchexpr")
 
 class Graph {
   constructor(grammar) {
@@ -39,7 +40,7 @@ class Graph {
       this.useRule(first, 1)
       this.buildStartRule(first)
     }
-    this.buildTokenRule(tokens)
+//    this.buildTokenRule(tokens)
   }
 
   useRule(name, n) {
@@ -107,13 +108,14 @@ class Graph {
       work.push(node)
     }
     reach(this.rules.START.start)
-    reach(this.rules._TOKEN.start)
+//    reach(this.rules._TOKEN.start)
 
     while (work.length) {
       let next = this.nodes[work.pop()]
       for (let i = 0; i < next.length; i++) {
         let edge = next[i]
         if (edge.to) reach(edge.to)
+        if (edge.match instanceof LookaheadMatch) reach(edge.match.start)
         for (let j = 0; j < edge.effects.length; j++)
           if (edge.effects[j] instanceof CallEffect)
             reach(edge.effects[j].returnTo)
@@ -129,7 +131,7 @@ class Graph {
       space: this.rules[first].space,
       start: this.node("START")
     }
-    let cur = rule.start, space = this.getRule(rule.space)
+    let cur = rule.start, space = rule.space && this.getRule(rule.space)
     if (space) {
       let next = this.node("START")
       this.edge(cur, space.start, null, [new CallEffect(rule.space, next)])
@@ -293,7 +295,10 @@ function generateExpr(start, end, expr, graph) {
       graph.edge(start, end)
     }
   } else if (t == "LookaheadMatch") {
-    throw new Error("not supporting lookahead yet")
+    let before = graph.node(null, "lookahead"), after = graph.node(null, "lookahead_end")
+    generateExpr(before, after, expr.expr, graph)
+    graph.edge(after, null, null, [returnEffect])
+    graph.edge(start, end, new LookaheadMatch(before, t.kind == "~"))
   } else if (t == "SequenceMatch") {
     for (let i = 0; i < expr.exprs.length; i++) {
       let next = end, to = next, cur = expr.exprs[i]
@@ -315,10 +320,11 @@ function generateExpr(start, end, expr, graph) {
 function simplifySequence(graph, node, edges) {
   for (let i = 0; i < edges.length; i++) {
     let first = edges[i], next
-    if (first.to == node || !first.to || first.match.matchesNewline ||
+    if (first.to == node || first.to == graph.rules.START.start ||
+        !first.to || first.match.isolated ||
         (next = graph.nodes[first.to]).length != 1) continue
     let second = next[0], end = second.to, effects
-    if (end == first.to || second.match.matchesNewline ||
+    if (end == first.to || second.match.isolated ||
         (!first.match.isNull && second.effects.some(e => e instanceof PushContext)) ||
         (!second.match.isNull && first.effects.indexOf(popContext) > -1))
       continue
@@ -349,10 +355,10 @@ function sameEffect(edge1, edge2) {
 function simplifyChoice(graph, node, edges) {
   for (let i = 0; i < edges.length; i++) {
     let edge = edges[i], set
-    if (edge.match.isNull || edge.match.matchesNewline) continue
+    if (edge.match.isNull || edge.match.isolated) continue
     for (let j = i + 1; j < edges.length; j++) {
       let other = edges[j]
-      if (other.to == edge.to && sameEffect(edge, other) && !other.match.isNull && !other.match.matchesNewline)
+      if (other.to == edge.to && sameEffect(edge, other) && !other.match.isNull && !other.match.isolated)
         (set || (set = [edge])).push(other)
     }
     if (set) {
@@ -367,10 +373,11 @@ function simplifyChoice(graph, node, edges) {
 }
 
 function simplifyRepeat(graph, node, edges) {
+  if (node == graph.rules.START.start) return
   let cycleIndex, cycleEdge
   for (let i = 0; i < edges.length; i++) {
     let edge = edges[i]
-    if (edge.to == node && !edge.match.matchesNewline && !edge.isNull) {
+    if (edge.to == node && !edge.match.isolated && !edge.isNull) {
       if (cycleEdge) return false
       cycleIndex = i
       cycleEdge = edge
@@ -381,6 +388,17 @@ function simplifyRepeat(graph, node, edges) {
   graph.nodes[newNode] = edges.slice(0, cycleIndex).concat(edges.slice(cycleIndex + 1))
   graph.nodes[node] = [new Edge(newNode, new RepeatMatch(cycleEdge.match), cycleEdge.effects)]
   return true
+}
+
+function simplifyLookahead(graph, node, edges) {
+  for (let i = 0; i < edges.length; i++) {
+    let edge = edges[i]
+    if (!(edge.match instanceof LookaheadMatch)) continue
+    let out = graph.nodes[edge.match.start]
+    if (out.length != 1 || out[0].to || out[0].match.isolated) continue
+    edges[i] = new Edge(edge.to, new SimpleLookaheadMatch(out[0].match, edge.match.positive), edge.effects)
+    return true
+  }
 }
 
 // Look for simplification possibilities around the given node, return
@@ -398,7 +416,7 @@ function simplifyWith(graph, simplifiers) {
 }
 
 function simplify(graph) {
-  while (simplifyWith(graph, [simplifyChoice, simplifyRepeat, simplifySequence])) {}
+  while (simplifyWith(graph, [simplifyChoice, simplifyRepeat, simplifySequence, simplifyLookahead])) {}
 }
 
 function mergeDuplicates(graph) {
