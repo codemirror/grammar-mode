@@ -21,12 +21,12 @@ function compileEdge(edge) {
   for (let i = 0; i < edge.effects.length; i++) {
     let effect = edge.effects[i]
     if (effect instanceof CallEffect)
-      body += `  state.stack[state.stack.length] = ${effect.returnTo}\n`
+      body += `  state.push(${effect.returnTo})\n`
     else if (effect instanceof PushContext)
       body += `  state.pushContext(${JSON.stringify(effect.name)}${!effect.value ? "" : ", " + JSON.stringify(effect.value)})\n`
   }
   if (edge.to)
-    body += `  state.stack[state.stack.length] = ${edge.to}\n`
+    body += `  state.push(${edge.to})\n`
 
   return match + ", " + (body ? "function(state) {\n" + body + "}" : needNoop = "noop")
 }
