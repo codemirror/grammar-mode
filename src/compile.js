@@ -18,21 +18,13 @@ function compileEdge(edge) {
   let match = "null", body = ""
   if (edge.match != nullMatch)
     match = `/^(?:${edge.match.regexp()})/${edge.match.matchesNewline ? "m" : ""}`
-  let saveContext = false
   for (let i = 0; i < edge.effects.length; i++) {
     let effect = edge.effects[i]
-    if (effect instanceof CallEffect) {
+    if (effect instanceof CallEffect)
       body += `  state.stack[state.stack.length] = ${effect.returnTo}\n`
-    } else if (effect == popContext) {
-      if (saveContext) { body += `  state.tokenContext = state.context\n`; saveContext = false }
-      body += `  state.context = state.context.prev\n`
-    } else if (effect instanceof PushContext) {
+    else if (effect instanceof PushContext)
       body += `  state.pushContext(${JSON.stringify(effect.name)}${!effect.value ? "" : ", " + JSON.stringify(effect.value)})\n`
-      saveContext = true
-    }
   }
-  if (saveContext)
-    body += `  state.tokenContext = state.context\n`
   if (edge.to)
     body += `  state.stack[state.stack.length] = ${edge.to}\n`
 

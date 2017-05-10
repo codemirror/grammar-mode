@@ -1,13 +1,27 @@
+class Context {
+  constructor(name, value, depth, parent) {
+    this.name = name
+    this.value = value
+    this.depth = depth
+    this.parent = parent
+  }
+}
+
 class State {
-  constructor(stack, context, tokenContext) {
+  constructor(stack, context) {
     this.stack = stack
-    this.context = this.tokenContext = context
+    this.context = context
+  }
+
+  popContext(depth) {
+    while (this.context && this.context.depth > depth)
+      this.context = this.context.parent
   }
 
   forward(stream) {
+    this.popContext(this.stack.length - 1)
     node: for (let depth = this.stack.length - 1;;) {
       let cur = this.stack[depth]
-      this.tokenContext = this.context
       for (let i = 0; i < cur.length; i += 2) {
         let match = cur[i], matched = false, progress = false
         if (!match) matched = true
@@ -16,20 +30,27 @@ class State {
         else if (match.test("")) matched = true
 
         if (matched) {
-          this.stack.length = depth
+          if (depth < this.stack.length) {
+            this.stack.length = depth
+            this.popContext(depth - 1)
+          }
           cur[i + 1](this)
+          let tokenContext = this.context
           depth = this.stack.length - 1
-          if (progress) return this.tokenContext
-          else continue node
+          if (progress) {
+            return tokenContext
+          } else {
+            this.popContext(depth)
+            continue node
+          }
         }
       }
       if (depth) depth--
-      else depth = this.stack.push(TOKEN) - 1
+      else depth = this.stack.push(_TOKEN) - 1
     }
   }
 
   token(stream) {
-    let startNode = this.stack[this.stack.length - 1]
     let context = this.forward(stream)
     if (stream.eol()) this.forward(null)
     for (; context; context = context.prev)
@@ -37,7 +58,7 @@ class State {
   }
 
   pushContext(name, value) {
-    this.context = {name, value, prev: this.context}
+    this.context = new Context(name, value, this.stack.length - 1, this.context)
   }
 
   copy() {
