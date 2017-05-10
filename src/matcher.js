@@ -5,31 +5,33 @@ class State {
   }
 
   forward(stream) {
-    node: for (;;) {
-      let cur = this.stack.pop()
+    node: for (let depth = this.stack.length - 1;;) {
+      let cur = this.stack[depth]
       this.tokenContext = this.context
       for (let i = 0; i < cur.length; i += 2) {
-        let match = cur[i]
-        if (match && (stream ? stream.match(match) : match.multiline)) {
+        let match = cur[i], matched = false, progress = false
+        if (!match) matched = true
+        else if (stream) progress = (matched = stream.match(match)) && stream.pos > stream.start
+        else if (match.multiline) matched = progress = true
+        else if (match.test("")) matched = true
+
+        if (matched) {
+          this.stack.length = depth
           cur[i + 1](this)
-          if (stream && stream.start == stream.pos)
-            continue node
-          else
-            return this.tokenContext
-        } else if (!match || match.test("")) {
-          cur[i + 1](this)
-          continue node
+          depth = this.stack.length - 1
+          if (progress) return this.tokenContext
+          else continue node
         }
       }
-      console.log("no match for", cur, "against", stream && stream.string.slice(stream.pos))
-      throw new Error("No match")
+      if (depth) depth--
+      else depth = this.stack.push(TOKEN) - 1
     }
   }
 
   token(stream) {
     let startNode = this.stack[this.stack.length - 1]
     let context = this.forward(stream)
-    if (stream.eol()) { console.log("end line from", this.stack[this.stack.length - 1]) ; this.forward(null) }
+    if (stream.eol()) this.forward(null)
     for (; context; context = context.prev)
       if (typeof context.value == "string") return context.value
   }

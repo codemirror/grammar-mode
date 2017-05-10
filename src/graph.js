@@ -17,9 +17,15 @@ class Graph {
                           uses: 0}
     }
     if (!first) throw new SyntaxError("Empty grammar")
+    if (this.rules._TOKEN) throw new SyntaxError("The rule name '_TOKEN' is reserved")
+    let tokens = []
     for (let name in this.rules) {
       let rule = this.rules[name]
       if (rule.space) this.useRule(rule.space, 2)
+      if (grammar.rules[name].isToken) {
+        this.useRule(name, 1)
+        tokens.push(name)
+      }
       forAllExprs(rule.expr, expr => {
         if (expr.type == "RuleIdentifier") this.useRule(expr.id.name, 1)
       })
@@ -31,6 +37,7 @@ class Graph {
       this.useRule(first, 1)
       this.buildStartRule(first)
     }
+    this.buildTokenRule(tokens)
   }
 
   useRule(name, n) {
@@ -98,6 +105,7 @@ class Graph {
       work.push(node)
     }
     reach(this.rules.START.start)
+    reach(this.rules._TOKEN.start)
 
     while (work.length) {
       let next = this.nodes[work.pop()]
@@ -116,12 +124,8 @@ class Graph {
   buildStartRule(first) {
     let rule = this.rules.START = {
       name: "START",
-      value: null,
       space: this.rules[first].space,
-      expr: null,
-      start: this.node("START"),
-      end: null,
-      uses: 1
+      start: this.node("START")
     }
     let cur = rule.start, space = this.getRule(rule.space)
     if (space) {
@@ -130,6 +134,19 @@ class Graph {
       cur = next
     }
     callRule(cur, rule.start, first, this)
+  }
+
+  buildTokenRule(tokens) {
+    let rule = this.rules._TOKEN = {
+      name: "_TOKEN",
+      start: this.node("_TOKEN"),
+      end: this.node("_TOKEN", "end"),
+      uses: 2
+    }
+    this.edge(rule.end, null, null, [returnEffect])
+    for (let i = 0; i < tokens.length; i++)
+      callRule(rule.start, rule.end, tokens[i], this)
+    this.edge(rule.start, rule.end, anyMatch)
   }
 
   merge(a, b) {
