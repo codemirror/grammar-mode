@@ -28,7 +28,7 @@ function matchEdge(node, stream) {
     let match = node[i]
     if (!match || stream.match(match)) return node[i + 1]
   }
-}    
+}
 
 class State {
   constructor(stack, context) {
@@ -50,7 +50,7 @@ class State {
   forwardAndUnwind(stream) {
     for (let depth = this.stack.length - 1;;) {
       let edge = matchEdge(this.stack[depth], stream)
-      if (edge) {
+      matched: if (edge) {
         let progress = stream.pos > stream.start
         if (depth == this.stack.length - 1) {
           // Regular continuation of the current state
@@ -64,23 +64,24 @@ class State {
           // Speculatively forward with a copy of the state when
           // encountering a null match during unwinding, since we only
           // want to commit to it when it matches something
-          let copy = new State(this.stack.slice(0, depth), this.context)
+          let copy = new State(this.stack.slice(0, depth + 1), this.context)
           if (copy.forward(stream)) {
             this.stack = copy.stack
             this.context = copy.context
             return
           } else {
-            continue
+            break matched
           }
         }
         this.popContext()
         edge(this)
         if (progress) return
         depth = this.stack.length - 1
-      } else { // No matching edge, unwind if possible, match a generic token and try again otherwise
-        if (depth) depth--
-        else depth = this.stack.push(_TOKEN) - 1
+        continue
       }
+      // No matching edge, unwind if possible, match a generic token and try again otherwise
+      if (depth) depth--
+      else depth = this.stack.push(_TOKEN) - 1
     }
   }
 
@@ -96,11 +97,11 @@ class State {
     this.stack[this.stack.length] = node
   }
 
-  pushContext(name, value, temporary) {
+  pushContext(name, value) {
     this.context = new Context(name, value, this.stack.length, this.context)
   }
 
-  popContext(depth) {
+  popContext() {
     while (this.context && this.stack.length <= this.context.depth)
       this.context = this.context.parent
   }

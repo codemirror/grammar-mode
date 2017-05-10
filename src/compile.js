@@ -1,5 +1,5 @@
 const parse = require("./parse")
-const {buildGraph, CallEffect, PushContext, popContext} = require("./graph")
+const {buildGraph, CallEffect, PushContext} = require("./graph")
 const {nullMatch} = require("./matchexpr")
 
 module.exports = function(file, showGraph) {
