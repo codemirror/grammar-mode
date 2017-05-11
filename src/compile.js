@@ -55,9 +55,7 @@ function compileGrammar(grammar) {
 
   if (needNoop) code += `function noop(){}\n`
 
-  code += require("fs").readFileSync(__dirname + "/matcher.js", "utf8")
-
-  code += `return new GrammarMode(${graph.rules.START.start})\n`
+  code += `return new (require("./matcher")).GrammarMode(${graph.rules.START.start}, ${graph.rules._TOKEN.start})\n`
 
   return code + "}();\n"
 }

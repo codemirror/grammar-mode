@@ -40,7 +40,7 @@ class State {
     return -1
   }
 
-  forwardAndUnwind(str) {
+  forwardAndUnwind(str, tokenNode) {
     for (let depth = this.stack.length - 1;;) {
       let edge = matchEdge(this.stack[depth], str)
       matched: if (edge) {
@@ -75,13 +75,13 @@ class State {
       }
       // No matching edge, unwind if possible, match a generic token and try again otherwise
       if (depth) depth--
-      else depth = this.stack.push(_TOKEN) - 1
+      else depth = this.stack.push(tokenNode) - 1
     }
   }
 
-  token(stream) {
+  token(stream, tokenNode) {
     let str = stream.string.slice(stream.pos)
-    stream.pos += this.forwardAndUnwind(str)
+    stream.pos += this.forwardAndUnwind(str, tokenNode)
     let context = this.context
     if (stream.eol()) this.forwardAndUnwind("\n")
     for (; context; context = context.parent)
@@ -106,9 +106,10 @@ class State {
   }
 }
 
-class GrammarMode {
-  constructor(startNode) {
+exports.GrammarMode = class GrammarMode {
+  constructor(startNode, tokenNode) {
     this.startNode = startNode
+    this.tokenNode = tokenNode
   }
 
   startState() { return new State([this.startNode], null) }
@@ -116,7 +117,7 @@ class GrammarMode {
   copyState(state) { return state.copy() }
 
   token(stream, state) {
-    return state.token(stream)
+    return state.token(stream, this.tokenNode)
   }
 
   blankLine(state) {
