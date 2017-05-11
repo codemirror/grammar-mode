@@ -103,7 +103,6 @@ class Graph {
     let reached = Object.create(null), work = []
 
     function reach(node) {
-      if (node == "expr_lookahead_end") console.trace("reached")
       if (node in reached) return
       reached[node] = true
       work.push(node)
@@ -363,7 +362,6 @@ function simplifySequence(graph, node, edges) {
     edges.splice(i, 1, ...newEdges)
     i += newEdges.length - 1
     return true
-    if (result) return true
   }
   return false
 }
@@ -425,6 +423,29 @@ function simplifyLookahead(graph, _node, edges) {
   }
 }
 
+function simplifyCall(graph, node, edges) {
+  for (let i = 0; i < edges.length; i++) {
+    let edge = edges[i]
+    for (let j = 0; j < edge.effects.length; j++) {
+      let effect = edge.effects[j]
+      if (!(effect instanceof CallEffect)) continue
+      let out = graph.nodes[effect.returnTo]
+      if (out.length != 1) continue
+      let after = out[0]
+      if (j == edge.effects.length - 1 && after.effects.length == 1 &&
+          after.effects[0] == returnEffect && after.match == nullMatch) {
+        // Change tail call to direct connection
+        edges[i] = new Edge(edge.to, edge.match, edge.effects.slice(0, edge.effects.length - 1))
+        return true
+      } else if (after.match == nullMatch && after.effects.length == 0) {
+        // Erase a null edge after a call
+        edge.effects[j] = new CallEffect(effect.rule, after.to)
+        return true
+      }
+    }
+  }
+}
+
 // Look for simplification possibilities around the given node, return
 // true if anything was done
 function simplifyWith(graph, simplifiers) {
@@ -440,7 +461,7 @@ function simplifyWith(graph, simplifiers) {
 }
 
 function simplify(graph) {
-  while (simplifyWith(graph, [simplifyChoice, simplifyRepeat, simplifySequence, simplifyLookahead])) {}
+  while (simplifyWith(graph, [simplifyChoice, simplifyRepeat, simplifySequence, simplifyLookahead, simplifyCall])) {}
 }
 
 function mergeDuplicates(graph) {
