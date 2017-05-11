@@ -11,7 +11,8 @@ class Graph {
       if (first == null) first = name
       let ast = grammar.rules[name]
       this.rules[name] = {name,
-                          context: ast.context ? {context: true} : ast.tokenType ? {tokenType: ast.tokenType} : null,
+                          context: ast.context,
+                          tokenType: ast.tokenType,
                           space: ast.space && ast.space.name,
                           expr: ast.expr,
                           start: null, end: null,
@@ -28,7 +29,7 @@ class Graph {
         this.useRule(name, 1)
         tokens.push(name)
       }
-      if (rule.context) this.useRule(name, 2)
+      if (rule.context || rule.tokenType) this.useRule(name, 2)
       forAllExprs(rule.expr, expr => {
         if (expr.type == "RuleIdentifier") this.useRule(expr.id.name, 1)
       })
@@ -55,14 +56,14 @@ class Graph {
       this.withRule(rule, () => {
         let start = rule.start = this.node()
         let end = rule.end = this.node(null, "end")
-        if (rule.context) {
+        if (rule.context || rule.tokenType) {
           let push = this.node(null, "push")
-          this.edge(start, push, null, [new PushContext(name, rule.context)])
+          this.edge(start, push, null, [new PushContext(name, rule.context, rule.tokenType)])
           start = push
           if (rule.uses == 1) end = this.node()
         }
         generateExpr(start, end, rule.expr, this)
-        if (rule.context) {
+        if (rule.context || rule.tokenType) {
           if (rule.uses > 1)
             this.edge(end, null, null, [popContext, returnEffect])
           else
@@ -242,10 +243,10 @@ const returnEffect = exports.returnEffect = new class ReturnEffect {
 }
 
 const PushContext = exports.PushContext = class {
-  constructor(name, value) {
+  constructor(name, context, tokenType) {
     this.name = name
-    this.context = value.context
-    this.tokenType = value.tokenType
+    this.context = context
+    this.tokenType = tokenType
   }
   eq(other) { return other instanceof PushContext && other.name == this.name }
   merge() {}
@@ -434,7 +435,8 @@ function simplifyCall(graph, node, edges) {
       if (out.length != 1) continue
       let after = out[0]
       if (j == edge.effects.length - 1 && after.effects.length == 1 &&
-          after.effects[0] == returnEffect && after.match == nullMatch) {
+          after.effects[0] == returnEffect && after.match == nullMatch &&
+          !graph.rules[effect.rule].context) {
         // Change tail call to direct connection
         edges[i] = new Edge(edge.to, edge.match, edge.effects.slice(0, edge.effects.length - 1))
         return true
@@ -462,7 +464,16 @@ function simplifyWith(graph, simplifiers) {
 }
 
 function simplify(graph) {
-  while (simplifyWith(graph, [simplifyChoice, simplifyRepeat, simplifySequence, simplifyLookahead, simplifyCall])) {}
+  do {
+    graph.gc()
+    mergeDuplicates(graph)
+  } while (simplifyWith(graph, [
+    simplifyChoice,
+    simplifyRepeat,
+    simplifySequence,
+    simplifyLookahead,
+    simplifyCall
+  ]))
 }
 
 function mergeDuplicates(graph) {
@@ -486,7 +497,5 @@ function mergeDuplicates(graph) {
 exports.buildGraph = function(grammar) {
   let graph = new Graph(grammar)
   simplify(graph)
-  mergeDuplicates(graph)
-  graph.gc()
   return graph
 }
