@@ -103,6 +103,7 @@ class Graph {
     let reached = Object.create(null), work = []
 
     function reach(node) {
+      if (node == "expr_lookahead_end") console.trace("reached")
       if (node in reached) return
       reached[node] = true
       work.push(node)
@@ -159,6 +160,11 @@ class Graph {
       let edges = this.nodes[node]
       for (let i = 0; i < edges.length; i++) edges[i].merge(a, b)
     }
+    for (let name in this.rules) {
+      let rule = this.rules[name]
+      if (rule.start == b) rule.start = a
+      if (rule.end == b) rule.end = a
+    }
   }
 
   toString() {
@@ -169,6 +175,15 @@ class Graph {
         output += "  " + edges[i].toString(node) + ";\n"
     }
     return output + "}\n"
+  }
+
+  countIncoming(node) {
+    let count = 0
+    for (let n in this.nodes) {
+      let edges = this.nodes[n]
+      for (let i = 0; i < edges.length; i++) if (edges[i].to == node) count++
+    }
+    return count
   }
 }
 
@@ -186,6 +201,7 @@ class Edge {
   merge(a, b) {
     if (this.to == b) this.to = a
     for (let i = 0; i < this.effects.length; i++) this.effects[i].merge(a, b)
+    if (this.match instanceof LookaheadMatch && this.match.start == b) this.match.start = a
   }
 
   toString(from) {
@@ -318,28 +334,36 @@ function generateExpr(start, end, expr, graph) {
 }
 
 function simplifySequence(graph, node, edges) {
-  for (let i = 0; i < edges.length; i++) {
-    let first = edges[i], next
-    if (first.to == node || first.to == graph.rules.START.start ||
-        !first.to || first.match.isolated ||
-        (next = graph.nodes[first.to]).length != 1) continue
-    let second = next[0], end = second.to, effects
-    if (end == first.to || second.match.isolated ||
-        (!first.match.isNull && second.effects.some(e => e instanceof PushContext)) ||
-        (!second.match.isNull && first.effects.indexOf(popContext) > -1))
-      continue
-    // If second is a return edge
-    if (!end) for (let j = first.effects.length - 1; j >= 0; j--) {
-      if (first.effects[j] instanceof CallEffect) {
-      // Matching call found, wire directly to return address, remove call/return effects
-        end = first.effects[j].returnTo
-        effects = first.effects.slice(0, j).concat(first.effects.slice(j + 1))
-          .concat(second.effects.filter(e => e != returnEffect))
+  outer: for (let i = 0; i < edges.length; i++) {
+    let first = edges[i]
+    if (first.to == node || first.to == graph.rules.START.start || !first.to) continue
+    let next = graph.nodes[first.to]
+    if (next.length == 0) continue
+    if (next.length == 0 ||
+        next.length > 1 && graph.countIncoming(first.to) > 1 && edges.length == 1) continue
+    let newEdges = []
+    for (let j = 0; j < next.length; j++) {
+      let second = next[j], end = second.to, effects
+      if (end == first.to ||
+          (!first.match.isNull && (second.match.isolated || second.effects.some(e => e instanceof PushContext))) ||
+          (!second.match.isNull && (first.match.isolated || first.effects.indexOf(popContext) > -1)))
+        continue outer
+      // If second is a return edge
+      if (!end) for (let k = first.effects.length - 1; k >= 0; k--) {
+        if (first.effects[k] instanceof CallEffect) {
+          // Matching call found, wire directly to return address, remove call/return effects
+          end = first.effects[k].returnTo
+          effects = first.effects.slice(0, k).concat(first.effects.slice(k + 1))
+            .concat(second.effects.filter(e => e != returnEffect))
+        }
       }
+      if (!effects) effects = first.effects.concat(second.effects)
+      newEdges.push(new Edge(end, SeqMatch.create(first.match, second.match), effects))
     }
-    if (!effects) effects = first.effects.concat(second.effects)
-    edges[i] = new Edge(end, SeqMatch.create(first.match, second.match), effects)
+    edges.splice(i, 1, ...newEdges)
+    i += newEdges.length - 1
     return true
+    if (result) return true
   }
   return false
 }
@@ -427,6 +451,7 @@ function mergeDuplicates(graph) {
       for (let j = i + 1; j < names.length; j++) {
         let otherName = names[j]
         if (eqArray(edges, graph.nodes[otherName])) {
+          if (otherName == "_TOKEN") { let tmp = name; name = otherName; otherName = tmp }
           graph.merge(name, otherName)
           continue outer
         }
