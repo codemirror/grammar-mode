@@ -33,18 +33,16 @@ function parseRule(p, rules, isToken, withSpace) {
   if (node.id.name in rules)
     p.raise(node.id.start, `Duplicate rule declaration '${node.id.name}'`)
   rules[node.id.name] = node
-  if (p.eat(tt.star)) {
-    node.value = true
-  } else if (p.eat(tt.eq)) {
-    if (p.type != tt.string) p.unexpected()
-    node.value = p.value
-    p.next()
-  } else {
-    node.value = null
-  }
+  node.context = p.eat(tt.star)
+  node.tokenType = null
   p.expect(tt.braceL)
   node.expr = parseExprChoice(p)
   p.expect(tt.braceR)
+  if (!node.context && p.eat(tt.eq)) {
+    if (p.type != tt.string) p.unexpected()
+    node.tokenType = p.value
+    p.next()
+  }
   return p.finishNode(node, "RuleDeclaration")
 }
 

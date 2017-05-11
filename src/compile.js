@@ -15,7 +15,7 @@ module.exports = function(file, showGraph) {
 }
 
 function compileEdge(edge) {
-  let parts = [], body = ""
+  let parts = [], body = "", result = null
   if (edge.match instanceof LookaheadMatch)
     parts.push(`lookahead: ${JSON.stringify(edge.match.start)}, type: ${edge.match.positive ? `"~"` : `"!"`}`)
   else if (edge.match != nullMatch)
@@ -24,17 +24,22 @@ function compileEdge(edge) {
     let effect = edge.effects[i]
     if (effect instanceof CallEffect) {
       let next = edge.effects[i + 1]
-      if (next && next instanceof PushContext && next.name == effect.rule) {
+      if (next && next instanceof PushContext && next.name == effect.rule && next.context) {
         body += `  state.pushContext(${JSON.stringify(next.name)}${!next.value ? "" : ", " + JSON.stringify(next.value)})\n`
         i++
       }
       body += `  state.push(${effect.returnTo})\n`
     } else if (effect instanceof PushContext) {
-      body += `  state.pushContext(${JSON.stringify(effect.name)}${!effect.value ? "" : ", " + JSON.stringify(effect.value)})\n`
+      if (effect.context)
+        body += `  state.pushContext(${JSON.stringify(effect.name)}${!effect.value ? "" : ", " + JSON.stringify(effect.value)})\n`
+      else
+        result = effect.tokenType
     }
   }
   if (edge.to)
     body += `  state.push(${edge.to})\n`
+  if (result)
+    body += `  return ${JSON.stringify(result)}\n`
   parts.push("apply: " + (body ? "function(state) {\n" + body + "}" : needNoop = "noop"))
   return "{" + parts.join(", ") + "}"
 }

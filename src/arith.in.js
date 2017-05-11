@@ -6,8 +6,8 @@ grammar arith {
     ParenExpr* { '(' Expr ')' }
   }
   tokens {
-    num="number" { '0'-'9'+ }
-    var="variable" { 'a'-'z'+ }
+    num { '0'-'9'+ } = "number"
+    var { 'a'-'z'+ } = "variable"
     op { '+' | '-' | '/' | '*' }
   }
   space { (' ' | '\t' | '\n')* }

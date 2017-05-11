@@ -22,6 +22,8 @@ function matchEdge(node, str) {
   }
 }
 
+let tokenValue = null
+
 class State {
   constructor(stack, context) {
     this.stack = stack
@@ -68,7 +70,7 @@ class State {
           }
         }
         this.popContext()
-        edge.apply(this)
+        tokenValue = edge.apply(this)
         if (taken > 0) return taken
         depth = this.stack.length - 1
         continue
@@ -81,11 +83,11 @@ class State {
 
   token(stream, tokenNode) {
     let str = stream.string.slice(stream.pos)
+    tokenValue = null
     stream.pos += this.forwardAndUnwind(str, tokenNode)
-    let context = this.context
+    let tokenType = tokenValue
     if (stream.eol()) this.forwardAndUnwind("\n")
-    for (; context; context = context.parent)
-      if (typeof context.value == "string") return context.value
+    return tokenType
   }
 
   push(node) {

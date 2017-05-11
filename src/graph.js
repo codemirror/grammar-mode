@@ -11,7 +11,7 @@ class Graph {
       if (first == null) first = name
       let ast = grammar.rules[name]
       this.rules[name] = {name,
-                          value: ast.value,
+                          context: ast.context ? {context: true} : ast.tokenType ? {tokenType: ast.tokenType} : null,
                           space: ast.space && ast.space.name,
                           expr: ast.expr,
                           start: null, end: null,
@@ -28,7 +28,7 @@ class Graph {
         this.useRule(name, 1)
         tokens.push(name)
       }
-      if (ast.value) this.useRule(name, 2)
+      if (rule.context) this.useRule(name, 2)
       forAllExprs(rule.expr, expr => {
         if (expr.type == "RuleIdentifier") this.useRule(expr.id.name, 1)
       })
@@ -55,14 +55,14 @@ class Graph {
       this.withRule(rule, () => {
         let start = rule.start = this.node()
         let end = rule.end = this.node(null, "end")
-        if (rule.value) {
+        if (rule.context) {
           let push = this.node(null, "push")
-          this.edge(start, push, null, [new PushContext(name, rule.value)])
+          this.edge(start, push, null, [new PushContext(name, rule.context)])
           start = push
           if (rule.uses == 1) end = this.node()
         }
         generateExpr(start, end, rule.expr, this)
-        if (rule.value) {
+        if (rule.context) {
           if (rule.uses > 1)
             this.edge(end, null, null, [popContext, returnEffect])
           else
@@ -244,7 +244,8 @@ const returnEffect = exports.returnEffect = new class ReturnEffect {
 const PushContext = exports.PushContext = class {
   constructor(name, value) {
     this.name = name
-    this.value = value
+    this.context = value.context
+    this.tokenType = value.tokenType
   }
   eq(other) { return other instanceof PushContext && other.name == this.name }
   merge() {}
