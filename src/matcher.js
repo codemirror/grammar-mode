@@ -7,30 +7,18 @@ class Context {
   }
 }
 
-class LineEndStream {
-  constructor() {
-    this.pos = 0
-  }
+let charsTaken = 0
+let nullMatch = /(?=.)/.exec(" ")
 
-  match(re) {
-    let match = re.exec("\n")
-    if (!match) return false
-    if (match[0].length) this.pos = 1
-    return true
-  }
-
-  get start() { return 0 }
-}
-
-function lookahead(edge, stream) {
-  throw new Error("FIXME")
-}
-
-function matchEdge(node, stream) {
+function matchEdge(node, str) {
   for (let i = 1; i < node.length; i++) {
     let edge = node[i]
-    if (edge.lookahead ? lookahead(edge, stream) : edge.match ? stream.match(edge.match) : true)
+    if (edge.lookahead) throw new Error("FIXME")
+    let match = edge.match ? edge.match.exec(str) : nullMatch
+    if (match) {
+      charsTaken = match[0].length
       return edge
+    }
   }
 }
 
@@ -40,26 +28,27 @@ class State {
     this.context = context
   }
 
-  forward(stream) {
+  forward(str) {
     for (;;) {
-      let edge = matchEdge(this.stack[this.stack.length - 1], stream)
+      let edge = matchEdge(this.stack[this.stack.length - 1], str)
       if (!edge) return false
       this.stack.pop()
       this.popContext()
       edge.apply(this)
-      if (stream.pos > stream.start) return true
+      if (charsTaken > 0) return charsTaken
     }
+    return -1
   }
 
-  forwardAndUnwind(stream) {
+  forwardAndUnwind(str) {
     for (let depth = this.stack.length - 1;;) {
-      let edge = matchEdge(this.stack[depth], stream)
+      let edge = matchEdge(this.stack[depth], str)
       matched: if (edge) {
-        let progress = stream.pos > stream.start
+        let taken = charsTaken
         if (depth == this.stack.length - 1) {
           // Regular continuation of the current state
           this.stack.pop()
-        } else if (progress) {
+        } else if (taken > 0) {
           // Unwinding some of the stack to continue after a mismatch.
           // Can use this state object because we already know there's
           // progress and we'll commit to this unwinding
@@ -69,17 +58,18 @@ class State {
           // encountering a null match during unwinding, since we only
           // want to commit to it when it matches something
           let copy = new State(this.stack.slice(0, depth + 1), this.context)
-          if (copy.forward(stream)) {
+          let forwarded = copy.forward(str)
+          if (forwarded > 0) {
             this.stack = copy.stack
             this.context = copy.context
-            return
+            return forwarded
           } else {
             break matched
           }
         }
         this.popContext()
         edge.apply(this)
-        if (progress) return
+        if (taken > 0) return taken
         depth = this.stack.length - 1
         continue
       }
@@ -90,9 +80,10 @@ class State {
   }
 
   token(stream) {
-    this.forwardAndUnwind(stream)
+    let str = stream.string.slice(stream.pos)
+    stream.pos += this.forwardAndUnwind(str)
     let context = this.context
-    if (stream.eol()) this.forwardAndUnwind(new LineEndStream)
+    if (stream.eol()) this.forwardAndUnwind("\n")
     for (; context; context = context.parent)
       if (typeof context.value == "string") return context.value
   }

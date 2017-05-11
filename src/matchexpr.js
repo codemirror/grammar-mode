@@ -150,8 +150,7 @@ class LookaheadMatch {
 
   eq(other) { return other instanceof LookaheadMatch && other.start == this.start && other.positive == this.positive }
 
-  regexp() {
-    // FIXME make sure this isn't called
+  regexp() { // Not actually a regexp, but used for graph output
     return "LOOKAHEAD(" + this.start + ")"
   }
 }
