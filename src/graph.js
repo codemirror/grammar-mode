@@ -48,7 +48,8 @@ function paramsFor(params, args) {
 }
 
 class Graph {
-  constructor(grammar) {
+  constructor(grammar, options) {
+    this.options = options || noParams
     this.nodes = Object.create(null)
     this.curName = null
     this.skipExprs = []
@@ -63,7 +64,8 @@ class Graph {
     if (!first) throw new SyntaxError("Empty grammar")
 
     this.start = this.buildStartNode(first)
-    this.token = this.buildTokenNode(tokens)
+    if (options.token !== false)
+      this.token = this.buildTokenNode(tokens)
   }
 
   getSkipExpr(node) {
@@ -127,7 +129,7 @@ class Graph {
       work.push(to)
     }
     reach(null, this.start, "start")
-    reach(null, this.token, "start")
+    if (this.token) reach(null, this.token, "start")
 
     while (work.length) {
       let node = work.pop(), next = this.nodes[node]
@@ -546,8 +548,8 @@ function mergeDuplicates(graph) {
   }
 }
 
-exports.buildGraph = function(grammar) {
-  let graph = new Graph(grammar)
+exports.buildGraph = function(grammar, options) {
+  let graph = new Graph(grammar, options)
   simplify(graph)
   return graph
 }
