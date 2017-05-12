@@ -1,7 +1,7 @@
 const {nullMatch, anyMatch, StringMatch, RangeMatch, SeqMatch, ChoiceMatch, RepeatMatch,
        LookaheadMatch, SimpleLookaheadMatch, eqArray} = require("./matchexpr")
 
-const none = []
+const none = [], noParams = Object.create(null)
 
 class Rule {
   constructor(name, context, tokenType, space, expr, params) {
@@ -13,6 +13,30 @@ class Rule {
     this.start = null
     this.params = params || none
   }
+}
+
+class LexicalContext {
+  constructor(graph, name, params, space) {
+    this.graph = graph
+    this.name = name
+    this.params = params
+    this.space = space
+  }
+
+  node(suffix) {
+    return this.graph.node(this.name, suffix)
+  }
+
+  call(start, end, name, params) {
+    this.graph.edge(start, this.graph.getRule(name, params).start, null, [new CallEffect(name, end)])
+  }
+}
+
+function paramsFor(params, args) {
+  if (!args.length) return noParams
+  let result = Object.create(null)
+  for (let i = 0; i < args.length; i++) result[params[i]] = args[i]
+  return result
 }
 
 class Graph {
@@ -43,23 +67,22 @@ class Graph {
     if (!rule) throw new SyntaxError(`No rule '${name}' defined`)
     if (rule.params.length != args.length) throw new SyntaxError(`Wrong number of arguments for rule '${name}'`)
     if (!rule.start) {
-      this.withName(name, () => {
-        let start = rule.start = this.node()
-        let end = this.node(null, "end")
-        if (rule.context || rule.tokenType) {
-          let push = this.node(null, "push")
-          this.edge(start, push, null, [new PushContext(name, rule.context, rule.tokenType)])
-          start = push
-        }
-        generateExpr(start, end, rule.expr, this, rule.space)
-        this.edge(end, null, null, rule.context || rule.tokenType? [popContext, returnEffect] : [returnEffect])
-      })
+      let cx = new LexicalContext(this, name, paramsFor(rule.params, args), rule.space)
+      let start = rule.start = cx.node()
+      let end = cx.node("end")
+      if (rule.context || rule.tokenType) {
+        let push = this.node("push")
+        this.edge(start, push, null, [new PushContext(name, rule.context, rule.tokenType)])
+        start = push
+      }
+      generateExpr(start, end, rule.expr, cx)
+      this.edge(end, null, null, rule.context || rule.tokenType? [popContext, returnEffect] : [returnEffect])
     }
     return rule
   }
 
   node(base, suffix) {
-    let label = (base || this.curName) + (suffix ? "_" + suffix : "")
+    let label = base + (suffix ? "_" + suffix : "")
     for (let i = 0;; i++) {
       let cur = i ? label + "_" + i : label
       if (!(cur in this.nodes)) {
@@ -73,14 +96,6 @@ class Graph {
     let edge = new Edge(to, match || nullMatch, effects)
     this.nodes[from].push(edge)
     return edge
-  }
-
-  withName(name, f) {
-    let prev = this.curName
-    this.curName = name
-    let result = f()
-    this.curName = prev
-    return result
   }
 
   gc() {
@@ -116,28 +131,25 @@ class Graph {
   }
 
   buildStartNode(first) {
-    let spaceRule = this.rules[first].space
-    return this.withName("START", () => {
-      let start = this.node(), cur = start
-      if (spaceRule) {
-        let next = this.node()
-        callRule(cur, next, spaceRule, this, none)
-        cur = next
-      }
-      callRule(cur, start, first, this, none)
-      return start
-    })
+    let cx = new LexicalContext(this, "START", noParams, this.rules[first].space)
+    let start = cx.node(), cur = start
+    if (cx.space) {
+      let next = cx.node()
+      cx.call(cur, next, cx.space, none)
+      cur = next
+    }
+    cx.call(cur, start, first, none)
+    return start
   }
 
   buildTokenNode(tokens) {
-    return this.withName("TOKEN", () => {
-      let start = this.node(), end = this.node(null, "end")
-      this.edge(end, null, null, [returnEffect])
-      for (let i = 0; i < tokens.length; i++)
-        callRule(start, end, tokens[i], this, none)
-      this.edge(start, end, anyMatch)
-      return start
-    })
+    let cx = new LexicalContext(this, "TOKEN", noParams, null)
+    let start = cx.node(), end = cx.node("end")
+    this.edge(end, null, null, [returnEffect])
+    for (let i = 0; i < tokens.length; i++)
+      cx.call(start, end, tokens[i], none)
+    this.edge(start, end, anyMatch)
+    return start
   }
 
   merge(a, b) {
@@ -249,19 +261,22 @@ function rm(array, i) {
   return copy
 }
 
-function maybeSpaceBefore(node, graph, space) {
-  if (!space) return node
-  let before = graph.node()
-  callRule(before, node, space, graph, none)
+function maybeSpaceBefore(node, cx) {
+  if (!cx.space) return node
+  let before = cx.node()
+  cx.call(before, node, cx.space, none)
   return before
 }
 
-function callRule(start, end, name, graph, params) {
-  graph.edge(start, graph.getRule(name, params).start, null, [new CallEffect(name, end)])
+function compileArgExpr(expr, cx) {
+  let start = cx.node(), end = cx.node()
+  generateExpr(start, end, expr, cx)
+  cx.graph.edge(end, null, null, [returnEffect])
+  return start
 }
 
-function generateExpr(start, end, expr, graph, space) {
-  let t = expr.type
+function generateExpr(start, end, expr, cx) {
+  let t = expr.type, graph = cx.graph
   if (t == "CharacterRange") {
     graph.edge(start, end, new RangeMatch(expr.from, expr.to))
   } else if (t == "StringMatch") {
@@ -269,11 +284,11 @@ function generateExpr(start, end, expr, graph, space) {
     for (let i = 0; i < separated.length - 1; i++) {
       let line = separated[i]
       if (line) {
-        let after = graph.node()
+        let after = cx.node()
         graph.edge(start, after, new StringMatch(line))
         start = after
       }
-      let after = graph.node()
+      let after = cx.node()
       graph.edge(start, after, new StringMatch("\n"))
       start = after
     }
@@ -282,36 +297,36 @@ function generateExpr(start, end, expr, graph, space) {
   } else if (t == "AnyMatch") {
     graph.edge(start, end, anyMatch)
   } else if (t == "RuleIdentifier") {
-    callRule(start, end, expr.id.name, graph, expr.arguments) // FIXME these have to be converted to something else
+    cx.call(start, end, expr.id.name, expr.arguments.map(arg => compileArgExpr(arg, cx)))
   } else if (t == "RepeatedMatch") {
     if (expr.kind == "*") {
       graph.edge(start, end)
-      generateExpr(end, maybeSpaceBefore(end, graph, space), expr.expr, graph, space)
+      generateExpr(end, maybeSpaceBefore(end, cx), expr.expr, cx)
     } else if (expr.kind == "+") {
-      generateExpr(start, maybeSpaceBefore(end, graph, space), expr.expr, graph, space)
-      generateExpr(end, maybeSpaceBefore(end, graph, space), expr.expr, graph, space)
+      generateExpr(start, maybeSpaceBefore(end, cx), expr.expr, cx)
+      generateExpr(end, maybeSpaceBefore(end, cx), expr.expr, cx)
     } else if (expr.kind == "?") {
-      generateExpr(start, end, expr.expr, graph, space)
+      generateExpr(start, end, expr.expr, cx)
       graph.edge(start, end)
     }
   } else if (t == "LookaheadMatch") {
-    let before = graph.node(null, "lookahead"), after = graph.node(null, "lookahead_end")
-    generateExpr(before, after, expr.expr, graph, space)
+    let before = cx.node("lookahead"), after = cx.node("lookahead_end")
+    generateExpr(before, after, expr.expr, cx)
     graph.edge(after, null, null, [returnEffect])
     graph.edge(start, end, new LookaheadMatch(before, t.kind == "~"))
   } else if (t == "SequenceMatch") {
     for (let i = 0; i < expr.exprs.length; i++) {
       let next = end, to = next, cur = expr.exprs[i]
       if (i < expr.exprs.length - 1) {
-        next = graph.node()
-        to = maybeSpaceBefore(next, graph, space)
+        next = cx.node()
+        to = maybeSpaceBefore(next, cx)
       }
-      generateExpr(start, to, cur, graph, space)
+      generateExpr(start, to, cur, cx)
       start = next
     }
   } else if (t == "ChoiceMatch") {
     for (let i = 0; i < expr.exprs.length; i++)
-      generateExpr(start, end, expr.exprs[i], graph, space)
+      generateExpr(start, end, expr.exprs[i], cx)
   } else {
     throw new Error("Unrecognized AST node type " + t)
   }
