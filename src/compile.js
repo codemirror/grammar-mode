@@ -17,8 +17,8 @@ function compileEdge(edge) {
   for (let i = 0; i < edge.effects.length; i++) {
     let effect = edge.effects[i]
     if (effect instanceof CallEffect) {
-      let next = edge.effects[i + 1]
-      if (next && next instanceof PushContext && next.name == effect.rule && next.context) {
+      let next = effect.hasContext && i < edge.effects.length - 1 && edge.effects[i + 1]
+      if (next && next instanceof PushContext && next.context) {
         body += `  state.pushContext(${JSON.stringify(next.name)}${!next.value ? "" : ", " + JSON.stringify(next.value)})\n`
         i++
       }

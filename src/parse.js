@@ -5,13 +5,11 @@ const {tokTypes: tt, parse, plugins} = require("acorn")
 function parseGrammar(p, node) {
   node.rules = Object.create(null)
   while (p.type != tt.eof) {
-    if (p.eat(tt._with)) {
-      p.expect(tt.parenL)
-      let space = p.parseIdent(true)
-      p.expect(tt.parenR)
+    if (p.eatContextual("skip")) {
+      let skip = parseExprChoice(p)
       p.expect(tt.braceL)
       while (!p.eat(tt.braceR))
-        parseRule(p, node.rules, false, space)
+        parseRule(p, node.rules, false, skip)
     } else if (p.eatContextual("tokens")) {
       p.expect(tt.braceL)
       while (!p.eat(tt.braceR))
@@ -23,10 +21,12 @@ function parseGrammar(p, node) {
   return p.finishNode(node, "GrammarDeclaration")
 }
 
-function parseRule(p, rules, isToken, withSpace) {
+function parseRule(p, rules, isToken, skip) {
   let node = p.startNode()
   node.isToken = isToken
-  node.space = withSpace
+  // FIXME Storing the same sub-ast in multiple nodes is a rather
+  // weird way to build an AST
+  node.skip = skip
   node.id = p.parseIdent(true)
   node.params = []
   if (p.eat(tt.parenL)) while (!p.eat(tt.parenR))
@@ -108,7 +108,7 @@ function parseExprLookahead(p) {
 }
 
 function endOfSequence(p) {
-  return p.type == tt.braceR || p.type == tt.parenR || p.type == tt.bitwiseOR
+  return p.type == tt.braceR || p.type == tt.parenR || p.type == tt.bitwiseOR || p.type == tt.braceL
 }
 
 function parseExprSequence(p) {

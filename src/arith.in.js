@@ -1,4 +1,4 @@
-with(space) {
+skip (' ' | '\t' | '\n')* {
   Expr { (num | var | ParenExpr) (op Expr)? }
   ParenExpr* { '(' Expr ')' }
 }
@@ -7,4 +7,3 @@ tokens {
   var { 'a'-'z'+ } = "variable"
   op { '+' | '-' | '/' | '*' }
 }
-space { (' ' | '\t' | '\n')* }

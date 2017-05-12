@@ -4,23 +4,23 @@ const {nullMatch, anyMatch, StringMatch, RangeMatch, SeqMatch, ChoiceMatch, Repe
 const none = [], noParams = Object.create(null)
 
 class Rule {
-  constructor(name, context, tokenType, space, expr, params) {
+  constructor(name, ast) {
     this.name = name
-    this.context = context
-    this.tokenType = tokenType
-    this.space = space
-    this.expr = expr
+    this.context = ast.context
+    this.tokenType = ast.tokenType
+    this.skip = ast.skip
+    this.expr = ast.expr
     this.instances = Object.create(null)
-    this.params = params || none
+    this.params = ast.params && ast.params.map(id => id.name)
   }
 }
 
 class LexicalContext {
-  constructor(graph, name, params, space) {
+  constructor(graph, name, params, skip) {
     this.graph = graph
     this.name = name
     this.params = params
-    this.space = space
+    this.skip = skip
   }
 
   node(suffix) {
@@ -28,14 +28,15 @@ class LexicalContext {
   }
 
   call(start, end, name, params) {
-    let target
+    let target, hasContext = false
     if (name in this.params) {
       target = this.params[name]
       if (params.length) throw new Error("Can't pass arguments to parameters")
     } else {
       target = this.graph.getRule(name, params)
+      hasContext = this.graph.rules[name].context
     }
-    this.graph.edge(start, target, null, [new CallEffect(name, end)])
+    this.graph.edge(start, target, null, [new CallEffect(end, name, hasContext)])
   }
 }
 
@@ -50,23 +51,28 @@ class Graph {
   constructor(grammar) {
     this.nodes = Object.create(null)
     this.curName = null
+    this.skipExprs = []
     this.rules = Object.create(null)
-    let first = null
+    let first = null, tokens = []
     for (let name in grammar.rules) {
       if (first == null) first = name
       let ast = grammar.rules[name]
-      this.rules[name] = new Rule(name, ast.context, ast.tokenType,
-                                  ast.space && ast.space.name,
-                                  ast.expr, ast.params.map(p => p.id.name))
+      this.rules[name] = new Rule(name, ast)
+      if (ast.isToken) tokens.push(name)
     }
-
     if (!first) throw new SyntaxError("Empty grammar")
-    let tokens = []
-    for (let name in this.rules)
-      if (grammar.rules[name].isToken) tokens.push(name)
 
     this.start = this.buildStartNode(first)
     this.token = this.buildTokenNode(tokens)
+  }
+
+  getSkipExpr(node) {
+    if (!node) return null
+    for (let i = 0; i < this.skipExprs.length; i += 2)
+      if (this.skipExprs[i] == node) return this.skipExprs[i + 1]
+    let compiled = compileSingleExpr(node, new LexicalContext(this, "skip", noParams, null))
+    this.skipExprs.push(node, compiled)
+    return compiled
   }
 
   getRule(name, args) {
@@ -75,7 +81,7 @@ class Graph {
     if (rule.params.length != args.length) throw new SyntaxError(`Wrong number of arguments for rule '${name}'`)
     let instanceKey = args.join(" "), found = rule.instances[instanceKey]
     if (!found) {
-      let cx = new LexicalContext(this, name, paramsFor(rule.params, args), rule.space)
+      let cx = new LexicalContext(this, name, paramsFor(rule.params, args), this.getSkipExpr(rule.skip))
       let start = found = rule.instances[instanceKey] = cx.node()
       let end = cx.node("end")
       if (rule.context || rule.tokenType) {
@@ -139,11 +145,12 @@ class Graph {
   }
 
   buildStartNode(first) {
-    let cx = new LexicalContext(this, "START", noParams, this.rules[first].space)
+    let cx = new LexicalContext(this, "START", noParams, null)
     let start = cx.node(), cur = start
-    if (cx.space) {
+    let skip = this.getSkipExpr(this.rules[first].skip)
+    if (skip) {
       let next = cx.node()
-      cx.call(cur, next, cx.space, none)
+      this.edge(cur, skip, null, [new CallEffect(next, "skip")])
       cur = next
     }
     cx.call(cur, start, first, none)
@@ -225,18 +232,19 @@ function forAllExprs(e, f) {
 }
 
 const CallEffect = exports.CallEffect = class {
-  constructor(rule, returnTo) {
-    this.rule = rule
+  constructor(returnTo, name, hasContext) {
     this.returnTo = returnTo
+    this.name = name
+    this.hasContext = !!hasContext
   }
 
   eq(other) {
-    return other instanceof CallEffect && other.rule == this.rule && other.returnTo == this.returnTo
+    return other instanceof CallEffect && other.hasContext == this.hasContext && other.returnTo == this.returnTo
   }
 
   merge(a, b) { if (this.returnTo == b) this.returnTo = a }
 
-  toString() { return `call ${this.rule} -> ${this.returnTo}` }
+  toString() { return `call ${this.name} -> ${this.returnTo}` }
 }
 
 const returnEffect = exports.returnEffect = new class ReturnEffect {
@@ -270,14 +278,14 @@ function rm(array, i) {
   return copy
 }
 
-function maybeSpaceBefore(node, cx) {
-  if (!cx.space) return node
+function maybeSkipBefore(node, cx) {
+  if (!cx.skip) return node
   let before = cx.node()
-  cx.call(before, node, cx.space, none)
+  cx.graph.edge(before, cx.skip, null, [new CallEffect(node, "skip")])
   return before
 }
 
-function compileArgExpr(expr, cx) {
+function compileSingleExpr(expr, cx) {
   let start = cx.node(), end = cx.node()
   generateExpr(start, end, expr, cx)
   cx.graph.edge(end, null, null, [returnEffect])
@@ -306,14 +314,14 @@ function generateExpr(start, end, expr, cx) {
   } else if (t == "AnyMatch") {
     graph.edge(start, end, anyMatch)
   } else if (t == "RuleIdentifier") {
-    cx.call(start, end, expr.id.name, expr.arguments.map(arg => compileArgExpr(arg, cx)))
+    cx.call(start, end, expr.id.name, expr.arguments.map(arg => compileSingleExpr(arg, cx)))
   } else if (t == "RepeatedMatch") {
     if (expr.kind == "*") {
       graph.edge(start, end)
-      generateExpr(end, maybeSpaceBefore(end, cx), expr.expr, cx)
+      generateExpr(end, maybeSkipBefore(end, cx), expr.expr, cx)
     } else if (expr.kind == "+") {
-      generateExpr(start, maybeSpaceBefore(end, cx), expr.expr, cx)
-      generateExpr(end, maybeSpaceBefore(end, cx), expr.expr, cx)
+      generateExpr(start, maybeSkipBefore(end, cx), expr.expr, cx)
+      generateExpr(end, maybeSkipBefore(end, cx), expr.expr, cx)
     } else if (expr.kind == "?") {
       generateExpr(start, end, expr.expr, cx)
       graph.edge(start, end)
@@ -328,7 +336,7 @@ function generateExpr(start, end, expr, cx) {
       let next = end, to = next, cur = expr.exprs[i]
       if (i < expr.exprs.length - 1) {
         next = cx.node()
-        to = maybeSpaceBefore(next, cx)
+        to = maybeSkipBefore(next, cx)
       }
       generateExpr(start, to, cur, cx)
       start = next
@@ -365,7 +373,7 @@ function simplifySequence(graph, node, edges) {
       // If second is a return edge
       if (!end) {
         let last = lastCall(first.effects)
-        if (last > -1 && !graph.rules[first.effects[last].rule].context) {
+        if (last > -1 && !first.effects[last].hasContext) {
           // Matching non-context call found, wire directly to return address, remove call/return effects
           end = first.effects[last].returnTo
           effects = rm(first.effects, last).concat(second.effects.filter(e => e != returnEffect))
@@ -478,14 +486,13 @@ function simplifyCall(graph, _node, edges) {
       if (out.length != 1) continue
       let after = out[0]
       if (after.match != nullMatch) continue
-      if (last && after.effects.length == 1 && after.effects[0] == returnEffect &&
-          !graph.rules[effect.rule].context) {
+      if (last && after.effects.length == 1 && after.effects[0] == returnEffect && !effect.hasContext) {
         // Change tail call to direct connection
         edges[i] = new Edge(edge.to, edge.match, rm(edge.effects, j))
         return true
       } else if (after.effects.length == 0) {
         // Erase a null edge after a call
-        edge.effects[j] = new CallEffect(effect.rule, after.to)
+        edge.effects[j] = new CallEffect(after.to, effect.name, effect.hasContext)
         return true
       }
       last = false
