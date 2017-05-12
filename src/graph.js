@@ -18,7 +18,7 @@ class Rule {
 class Graph {
   constructor(grammar) {
     this.nodes = Object.create(null)
-    this.curRule = null
+    this.curName = null
     this.rules = Object.create(null)
     let first = null
     for (let name in grammar.rules) {
@@ -30,14 +30,12 @@ class Graph {
     }
 
     if (!first) throw new SyntaxError("Empty grammar")
-    if (this.rules._TOKEN) throw new SyntaxError("The rule name '_TOKEN' is reserved")
     let tokens = []
     for (let name in this.rules)
       if (grammar.rules[name].isToken) tokens.push(name)
 
-    if (this.rules.START) this.getRule("START", none)
-    else this.buildStartRule(first)
-    this.buildTokenRule(tokens)
+    this.start = this.buildStartNode(first)
+    this.token = this.buildTokenNode(tokens)
   }
 
   getRule(name, args) {
@@ -45,7 +43,7 @@ class Graph {
     if (!rule) throw new SyntaxError(`No rule '${name}' defined`)
     if (rule.params.length != args.length) throw new SyntaxError(`Wrong number of arguments for rule '${name}'`)
     if (!rule.start) {
-      this.withRule(rule, () => {
+      this.withName(name, () => {
         let start = rule.start = this.node()
         let end = this.node(null, "end")
         if (rule.context || rule.tokenType) {
@@ -53,7 +51,7 @@ class Graph {
           this.edge(start, push, null, [new PushContext(name, rule.context, rule.tokenType)])
           start = push
         }
-        generateExpr(start, end, rule.expr, this)
+        generateExpr(start, end, rule.expr, this, rule.space)
         this.edge(end, null, null, rule.context || rule.tokenType? [popContext, returnEffect] : [returnEffect])
       })
     }
@@ -61,7 +59,7 @@ class Graph {
   }
 
   node(base, suffix) {
-    let label = (base || this.curRule.name) + (suffix ? "_" + suffix : "")
+    let label = (base || this.curName) + (suffix ? "_" + suffix : "")
     for (let i = 0;; i++) {
       let cur = i ? label + "_" + i : label
       if (!(cur in this.nodes)) {
@@ -77,11 +75,12 @@ class Graph {
     return edge
   }
 
-  withRule(rule, f) {
-    let prevRule = this.curRule
-    this.curRule = rule
-    f()
-    this.curRule = prevRule
+  withName(name, f) {
+    let prev = this.curName
+    this.curName = name
+    let result = f()
+    this.curName = prev
+    return result
   }
 
   gc() {
@@ -98,8 +97,8 @@ class Graph {
       reached[to] = true
       work.push(to)
     }
-    reach(null, this.rules.START.start, "start")
-    reach(null, this.rules._TOKEN.start, "start")
+    reach(null, this.start, "start")
+    reach(null, this.token, "start")
 
     while (work.length) {
       let node = work.pop(), next = this.nodes[node]
@@ -116,26 +115,29 @@ class Graph {
     return reached
   }
 
-  buildStartRule(first) {
-    let rule = this.rules.START = new Rule("START", null, null, this.rules[first].space)
-    rule.start = this.node("START")
-    let cur = rule.start, space = rule.space && this.getRule(rule.space, none)
-    if (space) {
-      let next = this.node("START")
-      this.edge(cur, space.start, null, [new CallEffect(rule.space, next)])
-      cur = next
-    }
-    callRule(cur, rule.start, first, this, none)
+  buildStartNode(first) {
+    let spaceRule = this.rules[first].space
+    return this.withName("START", () => {
+      let start = this.node(), cur = start
+      if (spaceRule) {
+        let next = this.node()
+        callRule(cur, next, spaceRule, this, none)
+        cur = next
+      }
+      callRule(cur, start, first, this, none)
+      return start
+    })
   }
 
-  buildTokenRule(tokens) {
-    let rule = this.rules._TOKEN = new Rule("_TOKEN")
-    rule.start = this.node("_TOKEN")
-    let end = this.node("_TOKEN", "end")
-    this.edge(end, null, null, [returnEffect])
-    for (let i = 0; i < tokens.length; i++)
-      callRule(rule.start, end, tokens[i], this, none)
-    this.edge(rule.start, end, anyMatch)
+  buildTokenNode(tokens) {
+    return this.withName("TOKEN", () => {
+      let start = this.node(), end = this.node(null, "end")
+      this.edge(end, null, null, [returnEffect])
+      for (let i = 0; i < tokens.length; i++)
+        callRule(start, end, tokens[i], this, none)
+      this.edge(start, end, anyMatch)
+      return start
+    })
   }
 
   merge(a, b) {
@@ -247,11 +249,10 @@ function rm(array, i) {
   return copy
 }
 
-function maybeSpaceBefore(node, graph) {
-  let withSpace = graph.curRule.space
-  if (!withSpace) return node
-  let space = graph.getRule(withSpace, none), before = graph.node()
-  graph.edge(before, space.start, null, [new CallEffect(withSpace, node)])
+function maybeSpaceBefore(node, graph, space) {
+  if (!space) return node
+  let before = graph.node()
+  callRule(before, node, space, graph, none)
   return before
 }
 
@@ -259,7 +260,7 @@ function callRule(start, end, name, graph, params) {
   graph.edge(start, graph.getRule(name, params).start, null, [new CallEffect(name, end)])
 }
 
-function generateExpr(start, end, expr, graph) {
+function generateExpr(start, end, expr, graph, space) {
   let t = expr.type
   if (t == "CharacterRange") {
     graph.edge(start, end, new RangeMatch(expr.from, expr.to))
@@ -285,17 +286,17 @@ function generateExpr(start, end, expr, graph) {
   } else if (t == "RepeatedMatch") {
     if (expr.kind == "*") {
       graph.edge(start, end)
-      generateExpr(end, maybeSpaceBefore(end, graph), expr.expr, graph)
+      generateExpr(end, maybeSpaceBefore(end, graph, space), expr.expr, graph, space)
     } else if (expr.kind == "+") {
-      generateExpr(start, maybeSpaceBefore(end, graph), expr.expr, graph)
-      generateExpr(end, maybeSpaceBefore(end, graph), expr.expr, graph)
+      generateExpr(start, maybeSpaceBefore(end, graph, space), expr.expr, graph, space)
+      generateExpr(end, maybeSpaceBefore(end, graph, space), expr.expr, graph, space)
     } else if (expr.kind == "?") {
-      generateExpr(start, end, expr.expr, graph)
+      generateExpr(start, end, expr.expr, graph, space)
       graph.edge(start, end)
     }
   } else if (t == "LookaheadMatch") {
     let before = graph.node(null, "lookahead"), after = graph.node(null, "lookahead_end")
-    generateExpr(before, after, expr.expr, graph)
+    generateExpr(before, after, expr.expr, graph, space)
     graph.edge(after, null, null, [returnEffect])
     graph.edge(start, end, new LookaheadMatch(before, t.kind == "~"))
   } else if (t == "SequenceMatch") {
@@ -303,14 +304,14 @@ function generateExpr(start, end, expr, graph) {
       let next = end, to = next, cur = expr.exprs[i]
       if (i < expr.exprs.length - 1) {
         next = graph.node()
-        to = maybeSpaceBefore(next, graph)
+        to = maybeSpaceBefore(next, graph, space)
       }
-      generateExpr(start, to, cur, graph)
+      generateExpr(start, to, cur, graph, space)
       start = next
     }
   } else if (t == "ChoiceMatch") {
     for (let i = 0; i < expr.exprs.length; i++)
-      generateExpr(start, end, expr.exprs[i], graph)
+      generateExpr(start, end, expr.exprs[i], graph, space)
   } else {
     throw new Error("Unrecognized AST node type " + t)
   }
@@ -325,7 +326,7 @@ function lastCall(effects) {
 function simplifySequence(graph, node, edges) {
   outer: for (let i = 0; i < edges.length; i++) {
     let first = edges[i]
-    if (first.to == node || first.to == graph.rules.START.start || !first.to) continue
+    if (first.to == node || first.to == graph.start || !first.to) continue
     let next = graph.nodes[first.to]
     if (next.length == 0) continue
     if (next.length == 0 ||
@@ -385,7 +386,7 @@ function simplifyChoice(graph, node, edges) {
 }
 
 function simplifyRepeat(graph, node, edges) {
-  if (node == graph.rules.START.start) return
+  if (node == graph.start) return
   let cycleIndex, cycleEdge
   for (let i = 0; i < edges.length; i++) {
     let edge = edges[i]
@@ -503,7 +504,6 @@ function mergeDuplicates(graph) {
       for (let j = i + 1; j < names.length; j++) {
         let otherName = names[j]
         if (eqArray(edges, graph.nodes[otherName])) {
-          if (otherName == "_TOKEN") { let tmp = name; name = otherName; otherName = tmp }
           graph.merge(name, otherName)
           continue outer
         }

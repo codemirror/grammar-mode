@@ -60,7 +60,7 @@ function compileGrammar(grammar) {
 
   if (needNoop) code += `function noop(){}\n`
 
-  code += `return new (require("./matcher")).GrammarMode(${graph.rules.START.start}, ${graph.rules._TOKEN.start})\n`
+  code += `return new (require("./matcher")).GrammarMode(${graph.start}, ${graph.token})\n`
 
   return code + "}();\n"
 }
