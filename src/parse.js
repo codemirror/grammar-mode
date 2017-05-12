@@ -1,12 +1,10 @@
 const {tokTypes: tt, parse, plugins} = require("acorn")
 
-function parseGrammar(p) {
-  let node = p.startNode()
-  p.next()
-  node.id = p.parseIdent()
+// FIXME Get rid of Acorn now that no actual JavaScript can appear in these files anymore?
+
+function parseGrammar(p, node) {
   node.rules = Object.create(null)
-  p.expect(tt.braceL)
-  while (!p.eat(tt.braceR)) {
+  while (p.type != tt.eof) {
     if (p.eat(tt._with)) {
       p.expect(tt.parenL)
       let space = p.parseIdent(true)
@@ -134,11 +132,8 @@ function parseExprChoice(p) {
 }
 
 plugins.modeGrammar = function(parser) {
-  parser.extend("parseStatement", inner => function(decl, topLevel, exports) {
-    if (topLevel && decl && this.isContextual("grammar"))
-      return parseGrammar(this)
-    else
-      return inner.call(this, decl, topLevel, exports)
+  parser.extend("parseTopLevel", () => function(node) {
+    return parseGrammar(this, node)
   })
 }
 

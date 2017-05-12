@@ -3,15 +3,9 @@ const {buildGraph, CallEffect, PushContext} = require("./graph")
 const {nullMatch, LookaheadMatch} = require("./matchexpr")
 
 module.exports = function(file, showGraph) {
-  let ast = parse(file), result = file
-  for (let i = ast.body.length - 1; i >= 0; i--) {
-    let node = ast.body[i]
-    if (node.type == "GrammarDeclaration") {
-      if (showGraph) return buildGraph(node).toString()
-      result = result.slice(0, node.start) + compileGrammar(node) + result.slice(node.end)
-    }
-  }
-  return result
+  let ast = parse(file)
+  if (showGraph) return buildGraph(ast).toString()
+  else return compileGrammar(ast)
 }
 
 function compileEdge(edge) {
@@ -49,7 +43,7 @@ let needNoop = false
 function compileGrammar(grammar) {
   let graph = buildGraph(grammar)
 
-  let code = `var ${grammar.id.name} = function() {\n`, nodes = []
+  let code = "", nodes = []
   needNoop = false
 
   for (let name in graph.nodes) {
@@ -60,7 +54,7 @@ function compileGrammar(grammar) {
 
   if (needNoop) code += `function noop(){}\n`
 
-  code += `return new (require("./matcher")).GrammarMode(${graph.start}, ${graph.token})\n`
+  code += `module.exports = new (require("./matcher")).GrammarMode(${graph.start}, ${graph.token})\n`
 
-  return code + "}();\n"
+  return code
 }

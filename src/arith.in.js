@@ -1,16 +1,10 @@
-const CodeMirror = require("codemirror")
-
-grammar arith {
-  with(space) {
-    Expr { (num | var | ParenExpr) (op Expr)? }
-    ParenExpr* { '(' Expr ')' }
-  }
-  tokens {
-    num { '0'-'9'+ } = "number"
-    var { 'a'-'z'+ } = "variable"
-    op { '+' | '-' | '/' | '*' }
-  }
-  space { (' ' | '\t' | '\n')* }
+with(space) {
+  Expr { (num | var | ParenExpr) (op Expr)? }
+  ParenExpr* { '(' Expr ')' }
 }
-
-CodeMirror.defineMode("arith", () => arith)
+tokens {
+  num { '0'-'9'+ } = "number"
+  var { 'a'-'z'+ } = "variable"
+  op { '+' | '-' | '/' | '*' }
+}
+space { (' ' | '\t' | '\n')* }
