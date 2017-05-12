@@ -34,5 +34,10 @@ describe("graph simplification", () => {
   it("keeps newline matches separate", () => {
     ist(gr(`foo { 'a' '\\n' }`),
         `START -> foo_1[label="a"];foo_1 -> START[label="\\\\n"]`, eq)
-  })    
+  })
+
+  it("supports rules with parameters", () => {
+    ist(gr(`foo { bar('x') bar('y') } bar(p) { p '!' }`),
+        `START -> START[label="x\\\\!y\\\\!"]`, eq)
+  })
 })
