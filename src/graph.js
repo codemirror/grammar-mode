@@ -10,7 +10,7 @@ class Rule {
     this.tokenType = tokenType
     this.space = space
     this.expr = expr
-    this.start = null
+    this.instances = Object.create(null)
     this.params = params || none
   }
 }
@@ -28,7 +28,14 @@ class LexicalContext {
   }
 
   call(start, end, name, params) {
-    this.graph.edge(start, this.graph.getRule(name, params).start, null, [new CallEffect(name, end)])
+    let target
+    if (name in this.params) {
+      target = this.params[name]
+      if (params.length) throw new Error("Can't pass arguments to parameters")
+    } else {
+      target = this.graph.getRule(name, params)
+    }
+    this.graph.edge(start, target, null, [new CallEffect(name, end)])
   }
 }
 
@@ -66,9 +73,10 @@ class Graph {
     let rule = this.rules[name]
     if (!rule) throw new SyntaxError(`No rule '${name}' defined`)
     if (rule.params.length != args.length) throw new SyntaxError(`Wrong number of arguments for rule '${name}'`)
-    if (!rule.start) {
+    let instanceKey = args.join(" "), found = rule.instances[instanceKey]
+    if (!found) {
       let cx = new LexicalContext(this, name, paramsFor(rule.params, args), rule.space)
-      let start = rule.start = cx.node()
+      let start = found = rule.instances[instanceKey] = cx.node()
       let end = cx.node("end")
       if (rule.context || rule.tokenType) {
         let push = this.node("push")
@@ -78,7 +86,7 @@ class Graph {
       generateExpr(start, end, rule.expr, cx)
       this.edge(end, null, null, rule.context || rule.tokenType? [popContext, returnEffect] : [returnEffect])
     }
-    return rule
+    return found
   }
 
   node(base, suffix) {
@@ -159,7 +167,8 @@ class Graph {
       for (let i = 0; i < edges.length; i++) edges[i].merge(a, b)
     }
     for (let name in this.rules) {
-      if (this.rules[name].start == b) this.rules[name].start = a
+      let instances = this.rules[name].instances
+      for (let key in instances) if (instances[key] == b) instances[key].start = a
     }
   }
 
