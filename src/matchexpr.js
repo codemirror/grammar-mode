@@ -72,7 +72,7 @@ class SeqMatch {
     else matches.push(left)
     let last = matches[matches.length - 1]
     if (right instanceof StringMatch && last instanceof StringMatch)
-      matches[matches.length - 1] = new StringMatch(last.value + right.value)
+      matches[matches.length - 1] = new StringMatch(last.string + right.string)
     else if (right instanceof SeqMatch) matches = matches.concat(right.matches)
     else matches.push(right)
     if (matches.length == 1) return matches[0]
