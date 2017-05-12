@@ -15,39 +15,18 @@ class Graph {
                           tokenType: ast.tokenType,
                           space: ast.space && ast.space.name,
                           expr: ast.expr,
-                          start: null, end: null,
-                          uses: 0}
+                          start: null}
     }
+
     if (!first) throw new SyntaxError("Empty grammar")
     if (this.rules._TOKEN) throw new SyntaxError("The rule name '_TOKEN' is reserved")
     let tokens = []
-    for (let name in this.rules) {
-      let rule = this.rules[name]
-      if (rule.space) this.useRule(rule.space, 2)
-      let ast = grammar.rules[name]
-      if (ast.isToken) {
-        this.useRule(name, 1)
-        tokens.push(name)
-      }
-      if (rule.context || rule.tokenType) this.useRule(name, 2)
-      forAllExprs(rule.expr, expr => {
-        if (expr.type == "RuleIdentifier") this.useRule(expr.id.name, 1)
-      })
-    }
-    if (this.rules.START) {
-      this.useRule("START", 1)
-      this.getRule("START")
-    } else {
-      this.useRule(first, 1)
-      this.buildStartRule(first)
-    }
-    this.buildTokenRule(tokens)
-  }
+    for (let name in this.rules)
+      if (grammar.rules[name].isToken) tokens.push(name)
 
-  useRule(name, n) {
-    let rule = this.rules[name]
-    if (!rule) throw new SyntaxError(`No rule '${name}' defined`)
-    rule.uses += n
+    if (this.rules.START) this.getRule("START")
+    else this.buildStartRule(first)
+    this.buildTokenRule(tokens)
   }
 
   getRule(name) {
@@ -55,22 +34,14 @@ class Graph {
     if (!rule.start) {
       this.withRule(rule, () => {
         let start = rule.start = this.node()
-        let end = rule.end = this.node(null, "end")
+        let end = this.node(null, "end")
         if (rule.context || rule.tokenType) {
           let push = this.node(null, "push")
           this.edge(start, push, null, [new PushContext(name, rule.context, rule.tokenType)])
           start = push
-          if (rule.uses == 1) end = this.node()
         }
         generateExpr(start, end, rule.expr, this)
-        if (rule.context || rule.tokenType) {
-          if (rule.uses > 1)
-            this.edge(end, null, null, [popContext, returnEffect])
-          else
-            this.edge(end, rule.end, null, [popContext])
-        } else if (rule.uses > 1) {
-          this.edge(rule.end, null, null, [returnEffect])
-        }
+        this.edge(end, null, null, rule.context || rule.tokenType? [popContext, returnEffect] : [returnEffect])
       })
     }
     return rule
@@ -101,29 +72,35 @@ class Graph {
   }
 
   gc() {
+    let reached = this.forEachRef()
+    for (let n in this.nodes) if (!(n in reached)) delete this.nodes[n]
+  }
+
+  forEachRef(f) {
     let reached = Object.create(null), work = []
 
-    function reach(node) {
-      if (node in reached) return
-      reached[node] = true
-      work.push(node)
+    function reach(from, to, type) {
+      if (f) f(from, to, type)
+      if (!to || (to in reached)) return
+      reached[to] = true
+      work.push(to)
     }
-    reach(this.rules.START.start)
-    reach(this.rules._TOKEN.start)
+    reach(null, this.rules.START.start, "start")
+    reach(null, this.rules._TOKEN.start, "start")
 
     while (work.length) {
-      let next = this.nodes[work.pop()]
+      let node = work.pop(), next = this.nodes[node]
       for (let i = 0; i < next.length; i++) {
         let edge = next[i]
-        if (edge.to) reach(edge.to)
-        if (edge.match instanceof LookaheadMatch) reach(edge.match.start)
+        if (edge.to) reach(node, edge.to, "edge")
+        if (edge.match instanceof LookaheadMatch)
+          reach(node, edge.match.start, "lookahead")
         for (let j = 0; j < edge.effects.length; j++)
           if (edge.effects[j] instanceof CallEffect)
-            reach(edge.effects[j].returnTo)
+            reach(node, edge.effects[j].returnTo, "return")
       }
     }
-
-    for (let n in this.nodes) if (!(n in reached)) delete this.nodes[n]
+    return reached
   }
 
   buildStartRule(first) {
@@ -144,14 +121,12 @@ class Graph {
   buildTokenRule(tokens) {
     let rule = this.rules._TOKEN = {
       name: "_TOKEN",
-      start: this.node("_TOKEN"),
-      end: this.node("_TOKEN", "end"),
-      uses: 2
-    }
-    this.edge(rule.end, null, null, [returnEffect])
+      start: this.node("_TOKEN")
+    }, end = this.node("_TOKEN", "end")
+    this.edge(end, null, null, [returnEffect])
     for (let i = 0; i < tokens.length; i++)
-      callRule(rule.start, rule.end, tokens[i], this)
-    this.edge(rule.start, rule.end, anyMatch)
+      callRule(rule.start, end, tokens[i], this)
+    this.edge(rule.start, end, anyMatch)
   }
 
   merge(a, b) {
@@ -161,9 +136,7 @@ class Graph {
       for (let i = 0; i < edges.length; i++) edges[i].merge(a, b)
     }
     for (let name in this.rules) {
-      let rule = this.rules[name]
-      if (rule.start == b) rule.start = a
-      if (rule.end == b) rule.end = a
+      if (this.rules[name].start == b) this.rules[name].start = a
     }
   }
 
@@ -259,6 +232,12 @@ const popContext = exports.popContext = new class PopContext {
   toString() { return "pop" }
 }
 
+function rm(array, i) {
+  let copy = array.slice()
+  copy.splice(i, 1)
+  return copy
+}
+
 function maybeSpaceBefore(node, graph) {
   let withSpace = graph.curRule.space
   if (!withSpace) return node
@@ -268,13 +247,7 @@ function maybeSpaceBefore(node, graph) {
 }
 
 function callRule(start, end, name, graph) {
-  let rule = graph.getRule(name)
-  if (rule.uses == 1) {
-    graph.edge(start, rule.start)
-    graph.edge(rule.end, end)
-  } else {
-    graph.edge(start, rule.start, null, [new CallEffect(name, end)])
-  }
+  graph.edge(start, graph.getRule(name).start, null, [new CallEffect(name, end)])
 }
 
 function generateExpr(start, end, expr, graph) {
@@ -334,6 +307,12 @@ function generateExpr(start, end, expr, graph) {
   }
 }
 
+function lastCall(effects) {
+  for (let i = effects.length - 1; i >= 0; i--)
+    if (effects[i] instanceof CallEffect) return i
+  return -1
+}
+
 function simplifySequence(graph, node, edges) {
   outer: for (let i = 0; i < edges.length; i++) {
     let first = edges[i]
@@ -350,12 +329,12 @@ function simplifySequence(graph, node, edges) {
           (!second.match.isNull && (first.match.isolated || first.effects.indexOf(popContext) > -1)))
         continue outer
       // If second is a return edge
-      if (!end) for (let k = first.effects.length - 1; k >= 0; k--) {
-        if (first.effects[k] instanceof CallEffect) {
-          // Matching call found, wire directly to return address, remove call/return effects
-          end = first.effects[k].returnTo
-          effects = first.effects.slice(0, k).concat(first.effects.slice(k + 1))
-            .concat(second.effects.filter(e => e != returnEffect))
+      if (!end) {
+        let last = lastCall(first.effects)
+        if (last > -1 && !graph.rules[first.effects[last].rule].context) {
+          // Matching non-context call found, wire directly to return address, remove call/return effects
+          end = first.effects[last].returnTo
+          effects = rm(first.effects, last).concat(second.effects.filter(e => e != returnEffect))
         }
       }
       if (!effects) effects = first.effects.concat(second.effects)
@@ -409,7 +388,7 @@ function simplifyRepeat(graph, node, edges) {
   }
   if (!cycleEdge || cycleEdge.effects.length) return false
   let newNode = graph.node(node, "split")
-  graph.nodes[newNode] = edges.slice(0, cycleIndex).concat(edges.slice(cycleIndex + 1))
+  graph.nodes[newNode] = rm(edges, cycleIndex)
   graph.nodes[node] = [new Edge(newNode, new RepeatMatch(cycleEdge.match), cycleEdge.effects)]
   return true
 }
@@ -425,26 +404,57 @@ function simplifyLookahead(graph, _node, edges) {
   }
 }
 
-function simplifyCall(graph, node, edges) {
+function isCalledOnlyOnce(graph, node) {
+  let localNodes = [node], returnNodes = [], workIndex = 0
+  while (workIndex < localNodes.length) {
+    let cur = localNodes[workIndex++], edges = graph.nodes[cur]
+    for (let i = 0; i < edges.length; i++) {
+      let to = edges[i].to
+      if (!to) returnNodes.push(cur)
+      else if (localNodes.indexOf(to) == -1) localNodes.push(to)
+    }
+  }
+
+  let called = 0
+  graph.forEachRef((from, to, type) => {
+    if (to != node || localNodes.indexOf(from) > -1) return
+    called += (type == "edge" ? 1 : 100)
+  })
+  return called == 1 && returnNodes.length ? returnNodes : null
+}
+
+function simplifyCall(graph, _node, edges) {
   for (let i = 0; i < edges.length; i++) {
-    let edge = edges[i]
-    for (let j = 0; j < edge.effects.length; j++) {
-      let effect = edge.effects[j]
+    let edge = edges[i], last = true
+    for (let j = edge.effects.length - 1; j >= 0; j--) {
+      let effect = edge.effects[j], returnNodes
       if (!(effect instanceof CallEffect)) continue
+      if (last && (returnNodes = isCalledOnlyOnce(graph, edge.to))) { // FIXME this is very quadratic
+        edges[i] = new Edge(edge.to, edge.match, rm(edge.effects, j))
+        for (let k = 0; k < returnNodes.length; k++) {
+          let edges = graph.nodes[returnNodes[k]]
+          for (let l = 0; l < edges.length; l++) {
+            let edge = edges[l]
+            if (!edge.to) edges[l] = new Edge(effect.returnTo, edge.match, edge.effects.filter(e => e != returnEffect))
+          }
+        }
+        return true
+      }
       let out = graph.nodes[effect.returnTo]
       if (out.length != 1) continue
       let after = out[0]
-      if (j == edge.effects.length - 1 && after.effects.length == 1 &&
-          after.effects[0] == returnEffect && after.match == nullMatch &&
+      if (after.match != nullMatch) continue
+      if (last && after.effects.length == 1 && after.effects[0] == returnEffect &&
           !graph.rules[effect.rule].context) {
         // Change tail call to direct connection
-        edges[i] = new Edge(edge.to, edge.match, edge.effects.slice(0, edge.effects.length - 1))
+        edges[i] = new Edge(edge.to, edge.match, rm(edge.effects, j))
         return true
-      } else if (after.match == nullMatch && after.effects.length == 0) {
+      } else if (after.effects.length == 0) {
         // Erase a null edge after a call
         edge.effects[j] = new CallEffect(effect.rule, after.to)
         return true
       }
+      last = false
     }
   }
 }
