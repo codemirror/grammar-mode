@@ -1,6 +1,20 @@
 const {nullMatch, anyMatch, StringMatch, RangeMatch, SeqMatch, ChoiceMatch, RepeatMatch,
        LookaheadMatch, SimpleLookaheadMatch, eqArray} = require("./matchexpr")
 
+const none = []
+
+class Rule {
+  constructor(name, context, tokenType, space, expr, params) {
+    this.name = name
+    this.context = context
+    this.tokenType = tokenType
+    this.space = space
+    this.expr = expr
+    this.start = null
+    this.params = params || none
+  }
+}
+
 class Graph {
   constructor(grammar) {
     this.nodes = Object.create(null)
@@ -10,12 +24,9 @@ class Graph {
     for (let name in grammar.rules) {
       if (first == null) first = name
       let ast = grammar.rules[name]
-      this.rules[name] = {name,
-                          context: ast.context,
-                          tokenType: ast.tokenType,
-                          space: ast.space && ast.space.name,
-                          expr: ast.expr,
-                          start: null}
+      this.rules[name] = new Rule(name, ast.context, ast.tokenType,
+                                  ast.space && ast.space.name,
+                                  ast.expr, ast.params.map(p => p.id.name))
     }
 
     if (!first) throw new SyntaxError("Empty grammar")
@@ -24,13 +35,15 @@ class Graph {
     for (let name in this.rules)
       if (grammar.rules[name].isToken) tokens.push(name)
 
-    if (this.rules.START) this.getRule("START")
+    if (this.rules.START) this.getRule("START", none)
     else this.buildStartRule(first)
     this.buildTokenRule(tokens)
   }
 
-  getRule(name) {
+  getRule(name, args) {
     let rule = this.rules[name]
+    if (!rule) throw new SyntaxError(`No rule '${name}' defined`)
+    if (rule.params.length != args.length) throw new SyntaxError(`Wrong number of arguments for rule '${name}'`)
     if (!rule.start) {
       this.withRule(rule, () => {
         let start = rule.start = this.node()
@@ -104,28 +117,24 @@ class Graph {
   }
 
   buildStartRule(first) {
-    let rule = this.rules.START = {
-      name: "START",
-      space: this.rules[first].space,
-      start: this.node("START")
-    }
-    let cur = rule.start, space = rule.space && this.getRule(rule.space)
+    let rule = this.rules.START = new Rule("START", null, null, this.rules[first].space)
+    rule.start = this.node("START")
+    let cur = rule.start, space = rule.space && this.getRule(rule.space, none)
     if (space) {
       let next = this.node("START")
       this.edge(cur, space.start, null, [new CallEffect(rule.space, next)])
       cur = next
     }
-    callRule(cur, rule.start, first, this)
+    callRule(cur, rule.start, first, this, none)
   }
 
   buildTokenRule(tokens) {
-    let rule = this.rules._TOKEN = {
-      name: "_TOKEN",
-      start: this.node("_TOKEN")
-    }, end = this.node("_TOKEN", "end")
+    let rule = this.rules._TOKEN = new Rule("_TOKEN")
+    rule.start = this.node("_TOKEN")
+    let end = this.node("_TOKEN", "end")
     this.edge(end, null, null, [returnEffect])
     for (let i = 0; i < tokens.length; i++)
-      callRule(rule.start, end, tokens[i], this)
+      callRule(rule.start, end, tokens[i], this, none)
     this.edge(rule.start, end, anyMatch)
   }
 
@@ -241,13 +250,13 @@ function rm(array, i) {
 function maybeSpaceBefore(node, graph) {
   let withSpace = graph.curRule.space
   if (!withSpace) return node
-  let space = graph.getRule(withSpace), before = graph.node()
+  let space = graph.getRule(withSpace, none), before = graph.node()
   graph.edge(before, space.start, null, [new CallEffect(withSpace, node)])
   return before
 }
 
-function callRule(start, end, name, graph) {
-  graph.edge(start, graph.getRule(name).start, null, [new CallEffect(name, end)])
+function callRule(start, end, name, graph, params) {
+  graph.edge(start, graph.getRule(name, params).start, null, [new CallEffect(name, end)])
 }
 
 function generateExpr(start, end, expr, graph) {
@@ -272,7 +281,7 @@ function generateExpr(start, end, expr, graph) {
   } else if (t == "AnyMatch") {
     graph.edge(start, end, anyMatch)
   } else if (t == "RuleIdentifier") {
-    callRule(start, end, expr.id.name, graph)
+    callRule(start, end, expr.id.name, graph, expr.arguments) // FIXME these have to be converted to something else
   } else if (t == "RepeatedMatch") {
     if (expr.kind == "*") {
       graph.edge(start, end)

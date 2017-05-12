@@ -30,6 +30,11 @@ function parseRule(p, rules, isToken, withSpace) {
   node.isToken = isToken
   node.space = withSpace
   node.id = p.parseIdent(true)
+  node.params = []
+  if (p.eat(tt.parenL)) while (!p.eat(tt.parenR))
+    node.params.push(p.parseIdent(true))
+  if (isToken && node.params.length > 0)
+    p.raise(node.params[0].start, "Token rules must not take parameters")
   if (node.id.name in rules)
     p.raise(node.id.start, `Duplicate rule declaration '${node.id.name}'`)
   rules[node.id.name] = node
@@ -72,6 +77,9 @@ function parseExprInner(p) {
       return p.finishNode(node, "AnyMatch")
     }
     node.id = p.parseIdent(true)
+    node.arguments = []
+    if (p.start == p.lastTokEnd && p.eat(tt.parenL)) while (!p.eat(tt.parenR))
+      node.arguments.push(parseExprChoice(p))
     return p.finishNode(node, "RuleIdentifier")
   }
 }
