@@ -24,7 +24,9 @@
   "author": "Marijn Haverbeke <marijnh@gmail.com>",
   "license": "MIT",
   "dependencies": {
-    "acorn": "^5.0.3"
+    "acorn": "^5.0.3",
+    "ist": "^1.0.1",
+    "mocha": "^3.3.0"
   },
   "devDependencies": {
     "codemirror": "^5.25.2"

@@ -217,8 +217,10 @@ class Edge {
   }
 
   toString(from) {
-    let effects = this.effects.length ? " " + this.effects.join(" ") : ""
-    return `${from} -> ${this.to || "NULL"}[label=${JSON.stringify(this.match.regexp() + effects)}]`
+    let result = `${from} -> ${this.to || "NULL"}`, label = this.match.regexp()
+    if (this.effects.length) label = (label ? label + " " : "") + this.effects.join(" ")
+    if (label) result += `[label=${JSON.stringify(label)}]`
+    return result
   }
 }
 
