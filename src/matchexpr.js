@@ -138,6 +138,22 @@ class RepeatMatch {
 }
 exports.RepeatMatch = RepeatMatch
 
+class MaybeMatch {
+  constructor(match) { this.match = match }
+
+  get isNull() { return false }
+
+  get isolated() { return false }
+
+  eq(other) { return other instanceof MaybeMatch && this.match.eq(other.match) }
+
+  regexp() {
+    if (this.match instanceof SeqMatch) return "(" + this.match.regexp() + ")?"
+    else return this.match.regexp() + "?"
+  }
+}
+exports.MaybeMatch = MaybeMatch
+
 class LookaheadMatch {
   constructor(start, positive) {
     this.start = start

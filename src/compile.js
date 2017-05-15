@@ -1,12 +1,7 @@
-const parse = require("./parse")
-const {buildGraph, CallEffect, PushContext} = require("./graph")
+const {CallEffect, PushContext} = require("./graph")
 const {nullMatch, LookaheadMatch} = require("./matchexpr")
 
-module.exports = function(file, showGraph) {
-  let ast = parse(file)
-  if (showGraph) return buildGraph(ast).toString()
-  else return compileGrammar(ast)
-}
+// FIXME reuse regexps when longer then a handful of chars
 
 function compileEdge(edge) {
   let parts = [], body = "", result = null
@@ -40,9 +35,7 @@ function compileEdge(edge) {
 
 let needNoop = false
 
-function compileGrammar(grammar) {
-  let graph = buildGraph(grammar)
-
+module.exports = function(graph) {
   let code = "", nodes = []
   needNoop = false
 

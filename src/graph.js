@@ -1,4 +1,4 @@
-const {nullMatch, anyMatch, StringMatch, RangeMatch, SeqMatch, ChoiceMatch, RepeatMatch,
+const {nullMatch, anyMatch, StringMatch, RangeMatch, SeqMatch, ChoiceMatch, RepeatMatch, MaybeMatch,
        LookaheadMatch, SimpleLookaheadMatch, eqArray} = require("./matchexpr")
 
 const none = [], noParams = Object.create(null)
@@ -64,7 +64,7 @@ class Graph {
     if (!first) throw new SyntaxError("Empty grammar")
 
     this.start = this.buildStartNode(first)
-    if (options.token !== false)
+    if (this.options.token !== false)
       this.token = this.buildTokenNode(tokens)
   }
 
@@ -179,6 +179,8 @@ class Graph {
       let instances = this.rules[name].instances
       for (let key in instances) if (instances[key] == b) instances[key].start = a
     }
+    if (this.start == b) this.start = a
+    if (this.token == b) this.token = a
   }
 
   toString() {
@@ -189,15 +191,6 @@ class Graph {
         output += "  " + edges[i].toString(node) + ";\n"
     }
     return output + "}\n"
-  }
-
-  countIncoming(node) {
-    let count = 0
-    for (let n in this.nodes) {
-      let edges = this.nodes[n]
-      for (let i = 0; i < edges.length; i++) if (edges[i].to == node) count++
-    }
-    return count
   }
 }
 
@@ -360,37 +353,33 @@ function lastCall(effects) {
 }
 
 function simplifySequence(graph, node, edges) {
+  let changed = false
   outer: for (let i = 0; i < edges.length; i++) {
     let first = edges[i]
     if (first.to == node || first.to == graph.start || !first.to) continue
     let next = graph.nodes[first.to]
-    if (next.length == 0) continue
-    if (next.length == 0 ||
-        next.length > 1 && graph.countIncoming(first.to) > 1 && edges.length == 1) continue
-    let newEdges = []
-    for (let j = 0; j < next.length; j++) {
-      let second = next[j], end = second.to, effects
-      if (end == first.to ||
-          (!first.match.isNull && (second.match.isolated || second.effects.some(e => e instanceof PushContext))) ||
-          (!second.match.isNull && (first.match.isolated || first.effects.indexOf(popContext) > -1)))
-        continue outer
-      // If second is a return edge
-      if (!end) {
-        let last = lastCall(first.effects)
-        if (last > -1 && !first.effects[last].hasContext) {
-          // Matching non-context call found, wire directly to return address, remove call/return effects
-          end = first.effects[last].returnTo
-          effects = rm(first.effects, last).concat(second.effects.filter(e => e != returnEffect))
-        }
+    if (next.length != 1) continue
+    for (let j = 0; j < edges.length; j++)
+      if (j != i && edges[j].to == first.to) continue outer
+    let second = next[0], end = second.to, effects
+    if (end == first.to ||
+        (!first.match.isNull && (second.match.isolated || second.effects.some(e => e instanceof PushContext))) ||
+        (!second.match.isNull && (first.match.isolated || first.effects.indexOf(popContext) > -1)))
+      continue
+    // If second is a return edge
+    if (!end) {
+      let last = lastCall(first.effects)
+      if (last > -1 && !first.effects[last].hasContext) {
+        // Matching non-context call found, wire directly to return address, remove call/return effects
+        end = first.effects[last].returnTo
+        effects = rm(first.effects, last).concat(second.effects.filter(e => e != returnEffect))
       }
-      if (!effects) effects = first.effects.concat(second.effects)
-      newEdges.push(new Edge(end, SeqMatch.create(first.match, second.match), effects))
     }
-    edges.splice(i, 1, ...newEdges)
-    i += newEdges.length - 1
-    return true
+    edges[i] = new Edge(end, SeqMatch.create(first.match, second.match),
+                        effects || first.effects.concat(second.effects))
+    changed = true
   }
-  return false
+  return changed
 }
 
 function sameEffect(edge1, edge2) {
@@ -437,6 +426,25 @@ function simplifyRepeat(graph, node, edges) {
   graph.nodes[newNode] = rm(edges, cycleIndex)
   graph.nodes[node] = [new Edge(newNode, new RepeatMatch(cycleEdge.match), cycleEdge.effects)]
   return true
+}
+
+function simplifyMaybe(_graph, _node, edges) {
+  let changed = false
+  outer: for (let i = 0; i < edges.length; i++) {
+    let edge = edges[i]
+    if (edge.match == nullMatch && edge.to) {
+      let other = -1
+      for (let j = 0; j < i; j++) if (edges[j].to == edge.to) {
+        if (other > -1 || !eqArray(edge.effects, edges[j].effects)) continue outer
+        other = j
+      }
+      if (other == -1) continue
+      edges[i--] = new Edge(edge.to, new MaybeMatch(edges[other].match), edge.effects)
+      edges.splice(other, 1)
+      changed = true
+    }
+  }
+  return changed
 }
 
 function simplifyLookahead(graph, _node, edges) {
@@ -506,29 +514,25 @@ function simplifyCall(graph, _node, edges) {
 
 // Look for simplification possibilities around the given node, return
 // true if anything was done
-function simplifyWith(graph, simplifiers) {
+function simplifyWith(graph, simplifier) {
   let changed = false
-  for (let node in graph.nodes) {
-    let edges = graph.nodes[node]
-    for (let i = 0; i < simplifiers.length; i++) if (simplifiers[i](graph, node, edges)) {
+  for (let node in graph.nodes)
+    if (simplifier(graph, node, graph.nodes[node]))
       changed = true
-      break
-    }
-  }
   return changed
 }
 
 function simplify(graph) {
-  do {
+  for (;;) {
+    while (simplifyWith(graph, simplifyChoice) |
+           simplifyWith(graph, simplifyRepeat) |
+           simplifyWith(graph, simplifyMaybe) |
+           simplifyWith(graph, simplifyLookahead) |
+           simplifyWith(graph, simplifySequence)) {}
     graph.gc()
     mergeDuplicates(graph)
-  } while (simplifyWith(graph, [
-    simplifyChoice,
-    simplifyRepeat,
-    simplifySequence,
-    simplifyLookahead,
-    simplifyCall
-  ]))
+    if (!simplifyWith(graph, simplifyCall)) break
+  }
 }
 
 function mergeDuplicates(graph) {
