@@ -35,7 +35,7 @@ function compileEdge(edge) {
 
 let needNoop = false
 
-module.exports = function(graph) {
+module.exports = function(graph, options = {}) {
   let code = "", nodes = []
   needNoop = false
 
@@ -47,8 +47,13 @@ module.exports = function(graph) {
 
   if (needNoop) code += `function noop(){}\n`
 
-  code += `exports.start = ${graph.start}\n`
-  if (graph.token) code += `exports.token = ${graph.token}\n`
+  if (options.esModule) {
+    code += `export var start = ${graph.start}\n`
+    if (graph.token) code += `export var token = ${graph.token}\n`
+  } else {
+    code += `exports.start = ${graph.start}\n`
+    if (graph.token) code += `exports.token = ${graph.token}\n`
+  }
 
   return code
 }

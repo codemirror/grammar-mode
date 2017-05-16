@@ -108,7 +108,7 @@ class State {
   }
 }
 
-exports.GrammarMode = class GrammarMode {
+(typeof exports == "object" ? exports : CodeMirror).GrammarMode = class GrammarMode {
   constructor(config) {
     this.startNode = config.start
     this.tokenNode = config.token

@@ -137,7 +137,7 @@ class RepeatMatch {
   eq(other) { return other instanceof RepeatMatch && this.match.eq(other.match) && this.type == other.type }
 
   regexp() {
-    if (this.match instanceof SeqMatch) return "(" + this.match.regexp() + ")" + this.type
+    if (this.match instanceof SeqMatch) return "(?:" + this.match.regexp() + ")" + this.type
     else return this.match.regexp() + this.type
   }
 }
