@@ -3,6 +3,8 @@ const {nullMatch, anyMatch, StringMatch, RangeMatch, SeqMatch, ChoiceMatch, Repe
 
 const none = [], noParams = Object.create(null)
 
+const reserved = {start: true, token: true, state: true, exports: true, noop: true}
+
 class Rule {
   constructor(name, ast) {
     this.name = name
@@ -101,7 +103,7 @@ class Graph {
     let label = base + (suffix ? "_" + suffix : "")
     for (let i = 0;; i++) {
       let cur = i ? label + "_" + i : label
-      if (!(cur in this.nodes)) {
+      if (!(cur in this.nodes) && !reserved.hasOwnProperty(cur)) {
         this.nodes[cur] = []
         return cur
       }
@@ -435,7 +437,7 @@ function simplifyMaybe(_graph, _node, edges) {
     if (edge.match == nullMatch && edge.to) {
       let other = -1
       for (let j = 0; j < i; j++) if (edges[j].to == edge.to) {
-        if (other > -1 || !eqArray(edge.effects, edges[j].effects)) continue outer
+        if (other > -1 || !eqArray(edge.effects, edges[j].effects) || edges[j].match.isNull) continue outer
         other = j
       }
       if (other == -1) continue
