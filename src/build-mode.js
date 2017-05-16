@@ -1,8 +1,9 @@
-let input = null, graph = false, output = null
+let input = null, outputGraph = false, token = true, output = null
 
 for (let i = 2; i < process.argv.length; i++) {
   let arg = process.argv[i]
-  if (arg == "--graph") graph=true
+  if (arg == "--graph") outputGraph = true
+  else if (arg == "--no-token") token = false
   else if (arg == "--output") output = process.argv[++i]
   else if (arg == "--help") usage(0)
   else if (input || arg[0] == "-") usage(1)
@@ -25,8 +26,8 @@ if (input) {
 
 function run(input) {
   let ast = require("./parse")(input)
-  let graph = require("./graph").buildGraph(ast)
-  if (graph)
+  let graph = require("./graph").buildGraph(ast, {token})
+  if (outputGraph)
     return graph.toString()
   else
     return require("./compile")(graph)
