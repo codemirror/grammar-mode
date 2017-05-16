@@ -121,38 +121,23 @@ class ChoiceMatch {
 exports.ChoiceMatch = ChoiceMatch
 
 class RepeatMatch {
-  constructor(match) {
+  constructor(match, type) {
     this.match = match
+    this.type = type
   }
 
   get isNull() { return false }
 
   get isolated() { return false }
 
-  eq(other) { return other instanceof RepeatMatch && this.match.eq(other.match) }
+  eq(other) { return other instanceof RepeatMatch && this.match.eq(other.match) && this.type == other.type }
 
   regexp() {
-    if (this.match instanceof SeqMatch) return "(" + this.match.regexp() + ")*"
-    else return this.match.regexp() + "*"
+    if (this.match instanceof SeqMatch) return "(" + this.match.regexp() + ")" + this.type
+    else return this.match.regexp() + this.type
   }
 }
 exports.RepeatMatch = RepeatMatch
-
-class MaybeMatch {
-  constructor(match) { this.match = match }
-
-  get isNull() { return false }
-
-  get isolated() { return false }
-
-  eq(other) { return other instanceof MaybeMatch && this.match.eq(other.match) }
-
-  regexp() {
-    if (this.match instanceof SeqMatch) return "(" + this.match.regexp() + ")?"
-    else return this.match.regexp() + "?"
-  }
-}
-exports.MaybeMatch = MaybeMatch
 
 class LookaheadMatch {
   constructor(start, positive) {

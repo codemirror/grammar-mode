@@ -1,4 +1,4 @@
-const {nullMatch, anyMatch, StringMatch, RangeMatch, SeqMatch, ChoiceMatch, RepeatMatch, MaybeMatch,
+const {nullMatch, anyMatch, StringMatch, RangeMatch, SeqMatch, ChoiceMatch, RepeatMatch,
        LookaheadMatch, SimpleLookaheadMatch, eqArray} = require("./matchexpr")
 
 const none = [], noParams = Object.create(null)
@@ -424,8 +424,24 @@ function simplifyRepeat(graph, node, edges) {
   if (!cycleEdge || cycleEdge.effects.length) return false
   let newNode = graph.node(node, "split")
   graph.nodes[newNode] = rm(edges, cycleIndex)
-  graph.nodes[node] = [new Edge(newNode, new RepeatMatch(cycleEdge.match), cycleEdge.effects)]
+  graph.nodes[node] = [new Edge(newNode, new RepeatMatch(cycleEdge.match, "*"), cycleEdge.effects)]
   return true
+}
+
+function simplifyOneOrMore(graph, _node, edges) {
+  let changed = false
+  for (let i = 0; i < edges.length; i++) {
+    let edge = edges[i]
+    if (!edge.to) continue
+    let out = graph.nodes[edge.to]
+    if (out.length != 1) continue
+    let next = out[0]
+    if (!(next.match instanceof RepeatMatch) || next.match.type != "*" || !next.match.match.eq(edge.match) ||
+        !eqArray(edge.effects, next.effects)) continue
+    edges[i] = new Edge(next.to, new RepeatMatch(edge.match, "+"), edge.effects)
+    changed = true
+  }
+  return changed
 }
 
 function simplifyMaybe(_graph, _node, edges) {
@@ -439,7 +455,7 @@ function simplifyMaybe(_graph, _node, edges) {
         other = j
       }
       if (other == -1) continue
-      edges[i--] = new Edge(edge.to, new MaybeMatch(edges[other].match), edge.effects)
+      edges[i--] = new Edge(edge.to, new RepeatMatch(edges[other].match, "?"), edge.effects)
       edges.splice(other, 1)
       changed = true
     }
@@ -526,6 +542,7 @@ function simplify(graph) {
   for (;;) {
     while (simplifyWith(graph, simplifyChoice) |
            simplifyWith(graph, simplifyRepeat) |
+           simplifyWith(graph, simplifyOneOrMore) |
            simplifyWith(graph, simplifyMaybe) |
            simplifyWith(graph, simplifyLookahead) |
            simplifyWith(graph, simplifySequence)) {}
