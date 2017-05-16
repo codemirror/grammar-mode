@@ -67,6 +67,10 @@ class SeqMatch {
   static create(left, right) {
     if (left == nullMatch) return right
     if (right == nullMatch) return left
+    // Simplify XX* to X+
+    if (right instanceof RepeatMatch && right.type == "*" && left.eq(right.match))
+      return new RepeatMatch(left, "+")
+
     let matches = []
     if (left instanceof SeqMatch) matches = matches.concat(left.matches)
     else matches.push(left)

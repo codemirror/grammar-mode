@@ -428,22 +428,6 @@ function simplifyRepeat(graph, node, edges) {
   return true
 }
 
-function simplifyOneOrMore(graph, _node, edges) {
-  let changed = false
-  for (let i = 0; i < edges.length; i++) {
-    let edge = edges[i]
-    if (!edge.to) continue
-    let out = graph.nodes[edge.to]
-    if (out.length != 1) continue
-    let next = out[0]
-    if (!(next.match instanceof RepeatMatch) || next.match.type != "*" || !next.match.match.eq(edge.match) ||
-        !eqArray(edge.effects, next.effects)) continue
-    edges[i] = new Edge(next.to, new RepeatMatch(edge.match, "+"), edge.effects)
-    changed = true
-  }
-  return changed
-}
-
 function simplifyMaybe(_graph, _node, edges) {
   let changed = false
   outer: for (let i = 0; i < edges.length; i++) {
@@ -542,7 +526,6 @@ function simplify(graph) {
   for (;;) {
     while (simplifyWith(graph, simplifyChoice) |
            simplifyWith(graph, simplifyRepeat) |
-           simplifyWith(graph, simplifyOneOrMore) |
            simplifyWith(graph, simplifyMaybe) |
            simplifyWith(graph, simplifyLookahead) |
            simplifyWith(graph, simplifySequence)) {}
