@@ -47,7 +47,8 @@ module.exports = function(graph) {
 
   if (needNoop) code += `function noop(){}\n`
 
-  code += `module.exports = new (require("./matcher")).GrammarMode(${graph.start}, ${graph.token})\n`
+  code += `exports.start = ${graph.start}\n`
+  if (graph.token) code += `exports.token = ${graph.token}\n`
 
   return code
 }

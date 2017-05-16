@@ -109,9 +109,9 @@ class State {
 }
 
 exports.GrammarMode = class GrammarMode {
-  constructor(startNode, tokenNode) {
-    this.startNode = startNode
-    this.tokenNode = tokenNode
+  constructor(config) {
+    this.startNode = config.start
+    this.tokenNode = config.token
   }
 
   startState() { return new State([this.startNode], null) }
