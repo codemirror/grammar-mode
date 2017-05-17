@@ -45,6 +45,7 @@ class State {
   forwardAndUnwind(str, tokenNode) {
     for (let depth = this.stack.length - 1;;) {
       let edge = matchEdge(this.stack[depth], str)
+      console.log("w/ stack", this.stack.map(m => m[0]), "match", edge && edge.apply.toString(), "@", depth)
       matched: if (edge) {
         let taken = charsTaken
         if (depth == this.stack.length - 1) {
@@ -71,6 +72,7 @@ class State {
         }
         this.popContext()
         tokenValue = edge.apply(this)
+        console.log("move state to", this.stack.map(m => m[0]), "ret=", taken > 0)
         if (taken > 0) return taken
         depth = this.stack.length - 1
         continue

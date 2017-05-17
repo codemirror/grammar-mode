@@ -21,7 +21,7 @@ function compileEdge(edge) {
     } else if (effect instanceof PushContext) {
       if (effect.context)
         body += `  state.pushContext(${JSON.stringify(effect.name)}${!effect.value ? "" : ", " + JSON.stringify(effect.value)})\n`
-      else
+      else // FIXME does this work for token types spread across multiple edges?
         result = effect.tokenType
     }
   }

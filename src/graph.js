@@ -399,23 +399,24 @@ function sameEffect(edge1, edge2) {
 }
 
 function simplifyChoice(graph, node, edges) {
+  let changed = false
   for (let i = 0; i < edges.length; i++) {
-    let edge = edges[i], set
+    let edge = edges[i]
     if (edge.match.isNull || edge.match.isolated) continue
-    for (let j = i + 1; j < edges.length; j++) {
-      let other = edges[j]
-      if (other.to == edge.to && sameEffect(edge, other) && !other.match.isNull && !other.match.isolated)
-        (set || (set = [edge])).push(other)
-    }
-    if (set) {
-      let match = set[0].match
-      for (let j = 1; j < set.length; j++)
-        match = ChoiceMatch.create(match, set[j].match)
-      graph.nodes[node] = edges.filter(e => set.indexOf(e) == -1).concat(new Edge(edge.to, match, edge.effects))
-      return true
+    let end = i + 1
+    while (end < edges.length &&
+           edges[end].to == edge.to && sameEffect(edge, edges[end]) &&
+           !edges[end].match.isNull && !edges[end].match.isolated)
+      end++
+    if (end > i + 1) {
+      let match = edge.match
+      for (let j = i + 1; j < end; j++)
+        match = ChoiceMatch.create(match, edges[j].match)
+      edges.splice(i, end - i, new Edge(edge.to, match, edge.effects))
+      changed = true
     }
   }
-  return false
+  return changed
 }
 
 function simplifyRepeat(graph, node, edges) {
@@ -532,13 +533,15 @@ function simplifyWith(graph, simplifier) {
 
 function simplify(graph) {
   for (;;) {
+    console.log("start " + graph)
     while (simplifyWith(graph, simplifyChoice) |
            simplifyWith(graph, simplifyRepeat) |
            simplifyWith(graph, simplifyMaybe) |
            simplifyWith(graph, simplifyLookahead) |
-           simplifyWith(graph, simplifySequence)) {}
+           simplifyWith(graph, simplifySequence)) {console.log("step " + graph)}
     graph.gc()
     mergeDuplicates(graph)
+    console.log("simplify " + graph)
     if (!simplifyWith(graph, simplifyCall)) break
   }
 }
