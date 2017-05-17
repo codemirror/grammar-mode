@@ -318,11 +318,15 @@ function generateExpr(start, end, expr, cx) {
     cx.call(start, end, expr.id.name, expr.arguments.map(arg => compileSingleExpr(arg, cx)))
   } else if (t == "RepeatedMatch") {
     if (expr.kind == "*") {
-      graph.edge(start, end)
-      generateExpr(end, maybeSkipBefore(end, cx), expr.expr, cx)
+      let mid = cx.node("rep")
+      graph.edge(start, mid)
+      generateExpr(mid, maybeSkipBefore(mid, cx), expr.expr, cx)
+      graph.edge(mid, end)
     } else if (expr.kind == "+") {
-      generateExpr(start, maybeSkipBefore(end, cx), expr.expr, cx)
-      generateExpr(end, maybeSkipBefore(end, cx), expr.expr, cx)
+      let mid = cx.node("rep"), midBefore = maybeSkipBefore(mid, cx)
+      generateExpr(start, midBefore, expr.expr, cx)
+      generateExpr(mid, midBefore, expr.expr, cx)
+      graph.edge(mid, end)
     } else if (expr.kind == "?") {
       generateExpr(start, end, expr.expr, cx)
       graph.edge(start, end)
