@@ -94,7 +94,7 @@ class Graph {
         start = push
       }
       generateExpr(start, end, rule.expr, cx)
-      this.edge(end, null, null, rule.context || rule.tokenType? [popContext, returnEffect] : [returnEffect])
+      this.edge(end, null, null, rule.context || rule.tokenType ? [popContext, returnEffect] : [returnEffect])
     }
     return found
   }
@@ -354,10 +354,16 @@ function generateExpr(start, end, expr, cx) {
   }
 }
 
-function lastCall(effects) {
-  for (let i = effects.length - 1; i >= 0; i--)
-    if (effects[i] instanceof CallEffect) return i
-  return -1
+function maybeSimplifyReturn(edge) {
+  if (edge.to) return edge
+  let callI = -1, returnI = -1
+  for (let i = edge.effects.length - 1; callI == -1 && i >= 0; i--) {
+    if (edge.effects[i] instanceof CallEffect) callI = i
+    else if (edge.effects[i] == returnEffect) returnI = i
+  }
+  if (returnI == -1) throw new Error("Invalid return edge " + edge)
+  if (callI == -1) return edge
+  return new Edge(edge.effects[callI].returnTo, edge.match, rm(rm(edge.effects, returnI), callI))
 }
 
 function simplifySequence(graph, node, edges) {
@@ -367,22 +373,13 @@ function simplifySequence(graph, node, edges) {
     if (first.to == node || first.to == graph.start || !first.to) continue
     let next = graph.nodes[first.to]
     if (next.length != 1) continue
-    let second = next[0], end = second.to, effects
-    if (end == first.to ||
+    let second = next[0]
+    if (second.to == first.to ||
         (!first.match.isNull && (second.match.isolated || second.effects.some(e => e instanceof PushContext))) ||
         (!second.match.isNull && (first.match.isolated || first.effects.indexOf(popContext) > -1)))
       continue
-    // If second is a return edge
-    if (!end) {
-      let last = lastCall(first.effects)
-      if (last > -1 && !first.effects[last].hasContext) {
-        // Matching non-context call found, wire directly to return address, remove call/return effects
-        end = first.effects[last].returnTo
-        effects = rm(first.effects, last).concat(second.effects.filter(e => e != returnEffect))
-      }
-    }
-    edges[i] = new Edge(end, SeqMatch.create(first.match, second.match),
-                        effects || first.effects.concat(second.effects))
+    edges[i] = maybeSimplifyReturn(new Edge(second.to, SeqMatch.create(first.match, second.match),
+                                            first.effects.concat(second.effects)))
     changed = true
   }
   return changed
@@ -473,8 +470,8 @@ function isCalledOnlyOnce(graph, node) {
 
   let called = 0
   graph.forEachRef((from, to, type) => {
-    if (to != node || localNodes.indexOf(from) > -1) return
-    called += (type == "edge" ? 1 : 100)
+    if (localNodes.indexOf(from) == -1 && localNodes.indexOf(to) > -1)
+      called += (type == "edge" ? 1 : 100)
   })
   return called == 1 && returnNodes.length ? returnNodes : null
 }
@@ -521,7 +518,7 @@ function simplifyNullEdge(graph, _node, edges) {
     let edge = edges[i]
     if (edge.match != nullMatch || !edge.to) continue
     let newEdges = graph.nodes[edge.to].map(next => {
-      return new Edge(next.to, next.match, edge.effects.concat(next.effects))
+      return maybeSimplifyReturn(new Edge(next.to, next.match, edge.effects.concat(next.effects)))
     })
     edges.splice(i, 1, ...newEdges)
     i += newEdges.length - 1
