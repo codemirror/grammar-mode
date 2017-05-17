@@ -41,6 +41,13 @@ const anyMatch = exports.anyMatch = new class AnyMatch {
   get isNull() { return false }
   get isolated() { return true }
   eq(other) { return other == anyMatch }
+  regexp() { return "[^]" }
+}
+
+const dotMatch = exports.dotMatch = new class DotMatch {
+  get isNull() { return false }
+  get isolated() { return false }
+  eq(other) { return other == dotMatch }
   regexp() { return "." }
 }
 
@@ -67,20 +74,26 @@ class SeqMatch {
   static create(left, right) {
     if (left == nullMatch) return right
     if (right == nullMatch) return left
-    // Simplify XX* to X+
-    if (right instanceof RepeatMatch && right.type == "*" && left.eq(right.match))
-      return new RepeatMatch(left, "+")
 
-    let matches = []
-    if (left instanceof SeqMatch) matches = matches.concat(left.matches)
-    else matches.push(left)
-    let last = matches[matches.length - 1]
-    if (right instanceof StringMatch && last instanceof StringMatch)
-      matches[matches.length - 1] = new StringMatch(last.string + right.string)
-    else if (right instanceof SeqMatch) matches = matches.concat(right.matches)
-    else matches.push(right)
-    if (matches.length == 1) return matches[0]
-    else return new SeqMatch(matches)
+    let before = left instanceof SeqMatch ? left.matches : [left]
+    let after = right instanceof SeqMatch ? right.matches : [right]
+    let last = before[before.length - 1], first = after[0]
+
+    if (last instanceof StringMatch && first instanceof StringMatch) {
+      after[0] = new StringMatch(last.string + right.string)
+      before.pop()
+    } else if (first instanceof RepeatMatch && first.type == "*") {
+      if (last.eq(first.match)) {
+        after[0] = new RepeatMatch(last, "+")
+        before.pop()
+      } else if (first.match instanceof StringMatch && last instanceof StringMatch &&
+                 new RegExp(first.match.regexp() + "$").test(last.string)) {
+        after[0] = new RepeatMatch(first.match, "+")
+        before[before.length - 1] = new StringMatch(last.string.slice(0, last.string.length - first.match.string.length))
+      }
+    }
+    let matches = before.concat(after)
+    return matches.length == 1 ? matches[0] : new SeqMatch(matches)
   }
 }
 exports.SeqMatch = SeqMatch
