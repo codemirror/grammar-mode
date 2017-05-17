@@ -45,7 +45,6 @@ class State {
   forwardAndUnwind(str, tokenNode) {
     for (let depth = this.stack.length - 1;;) {
       let edge = matchEdge(this.stack[depth], str)
-      console.log("w/ stack", this.stack.map(m => m[0]), "match", edge && edge.apply.toString(), "@", depth)
       matched: if (edge) {
         let taken = charsTaken
         if (depth == this.stack.length - 1) {
@@ -72,7 +71,6 @@ class State {
         }
         this.popContext()
         tokenValue = edge.apply(this)
-        console.log("move state to", this.stack.map(m => m[0]), "ret=", taken > 0)
         if (taken > 0) return taken
         depth = this.stack.length - 1
         continue
@@ -81,15 +79,6 @@ class State {
       if (depth) depth--
       else depth = this.stack.push(tokenNode) - 1
     }
-  }
-
-  token(stream, tokenNode) {
-    let str = stream.string.slice(stream.pos)
-    tokenValue = null
-    stream.pos += this.forwardAndUnwind(str, tokenNode)
-    let tokenType = tokenValue
-    if (stream.eol()) this.forwardAndUnwind("\n")
-    return tokenType
   }
 
   push(node) {
@@ -121,10 +110,15 @@ class State {
   copyState(state) { return state.copy() }
 
   token(stream, state) {
-    return state.token(stream, this.tokenNode)
+    let str = stream.string.slice(stream.pos)
+    tokenValue = null
+    stream.pos += state.forwardAndUnwind(str, this.tokenNode)
+    let tokenType = tokenValue
+    if (stream.eol()) state.forwardAndUnwind("\n", this.tokenNode)
+    return tokenType
   }
 
   blankLine(state) {
-    return state.forward(null)
+    state.forwardAndUnwind("\n", this.tokenNode)
   }
 }
