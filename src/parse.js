@@ -73,6 +73,9 @@ function parseExprInner(p) {
     if (p.type == tt.name && p.value == "_") {
       p.next()
       return p.finishNode(node, "AnyMatch")
+    } else if (p.type == tt.dot) {
+      p.next()
+      return p.finishNode(node, "DotMatch")
     }
     node.id = p.parseIdent(true)
     node.arguments = []
