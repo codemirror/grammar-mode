@@ -459,12 +459,24 @@ function simplifyLookahead(graph, _node, edges) {
 
 function isCalledOnlyOnce(graph, node) {
   let localNodes = [node], returnNodes = [], workIndex = 0
+  function add(node) {
+    if (localNodes.indexOf(node) == -1) localNodes.push(node)
+  }
+
   while (workIndex < localNodes.length) {
     let cur = localNodes[workIndex++], edges = graph.nodes[cur]
-    for (let i = 0; i < edges.length; i++) {
-      let to = edges[i].to
-      if (!to) returnNodes.push(cur)
-      else if (localNodes.indexOf(to) == -1 && !edges[i].effects.some(e => e instanceof CallEffect)) localNodes.push(to)
+    edgeLoop: for (let i = 0; i < edges.length; i++) {
+      let edge = edges[i], to = edge.to
+      if (!to) {
+        returnNodes.push(cur)
+      } else {
+        for (let j = edge.effects.length - 1; j >= 0; j--)
+          if (edge.effects[j] instanceof CallEffect) {
+            add(edge.effects[j].returnTo)
+            continue edgeLoop
+          }
+        add(edge.to)
+      }
     }
   }
 
