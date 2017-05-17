@@ -399,24 +399,25 @@ function sameEffect(edge1, edge2) {
 }
 
 function simplifyChoice(graph, node, edges) {
-  let changed = false
-  for (let i = 0; i < edges.length; i++) {
+  if (edges.length < 2) return false
+  let first = edges[0], elseEdge = null
+  if (first.match.isNull) return false
+  for (let i = 1; i < edges.length; i++) {
     let edge = edges[i]
-    if (edge.match.isNull || edge.match.isolated) continue
-    let end = i + 1
-    while (end < edges.length &&
-           edges[end].to == edge.to && sameEffect(edge, edges[end]) &&
-           !edges[end].match.isNull && !edges[end].match.isolated)
-      end++
-    if (end > i + 1) {
-      let match = edge.match
-      for (let j = i + 1; j < end; j++)
-        match = ChoiceMatch.create(match, edges[j].match)
-      edges.splice(i, end - i, new Edge(edge.to, match, edge.effects))
-      changed = true
-    }
+    if (edge.match.isNull && i == edges.length - 1)
+      elseEdge = edge
+    else if (edge.to != first.to || !sameEffect(first, edge) || edge.match.isNull || edge.match.isolated)
+      return false
   }
-  return changed
+  let choices = edges.length - (elseEdge ? 1 : 0)
+  if (choices > 1 && first.match.isolated) return false
+  let match = first.match
+  for (let i = 1; i < choices; i++) match = ChoiceMatch.create(match, edges[i].match)
+  if (elseEdge && elseEdge.to == first.to && sameEffect(first, elseEdge))
+    graph.nodes[node] = [new Edge(first.to, new RepeatMatch(match, "?"), first.effects)]
+  else
+    graph.nodes[node] = [new Edge(first.to, match, first.effects), ...elseEdge ? [elseEdge] : []]
+  return true
 }
 
 function simplifyRepeat(graph, node, edges) {
@@ -435,25 +436,6 @@ function simplifyRepeat(graph, node, edges) {
   graph.nodes[newNode] = rm(edges, cycleIndex)
   graph.nodes[node] = [new Edge(newNode, new RepeatMatch(cycleEdge.match, "*"), cycleEdge.effects)]
   return true
-}
-
-function simplifyMaybe(_graph, _node, edges) {
-  let changed = false
-  outer: for (let i = 0; i < edges.length; i++) {
-    let edge = edges[i]
-    if (edge.match == nullMatch && edge.to) {
-      let other = -1
-      for (let j = 0; j < i; j++) if (edges[j].to == edge.to) {
-        if (other > -1 || !eqArray(edge.effects, edges[j].effects) || edges[j].match.isNull) continue outer
-        other = j
-      }
-      if (other == -1) continue
-      edges[i--] = new Edge(edge.to, new RepeatMatch(edges[other].match, "?"), edge.effects)
-      edges.splice(other, 1)
-      changed = true
-    }
-  }
-  return changed
 }
 
 function simplifyLookahead(graph, _node, edges) {
@@ -531,17 +513,15 @@ function simplifyWith(graph, simplifier) {
   return changed
 }
 
+// FIXME maybe add a non-total-simplifyChoice variant when the others no longer match?
 function simplify(graph) {
   for (;;) {
-    console.log("start " + graph)
     while (simplifyWith(graph, simplifyChoice) |
            simplifyWith(graph, simplifyRepeat) |
-           simplifyWith(graph, simplifyMaybe) |
            simplifyWith(graph, simplifyLookahead) |
-           simplifyWith(graph, simplifySequence)) {console.log("step " + graph)}
+           simplifyWith(graph, simplifySequence)) {}
     graph.gc()
     mergeDuplicates(graph)
-    console.log("simplify " + graph)
     if (!simplifyWith(graph, simplifyCall)) break
   }
 }
