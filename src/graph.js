@@ -1,4 +1,4 @@
-const {nullMatch, anyMatch, StringMatch, RangeMatch, SeqMatch, ChoiceMatch, RepeatMatch,
+const {nullMatch, anyMatch, dotMatch, StringMatch, RangeMatch, SeqMatch, ChoiceMatch, RepeatMatch,
        LookaheadMatch, SimpleLookaheadMatch, eqArray} = require("./matchexpr")
 
 const none = [], noParams = Object.create(null)
@@ -89,7 +89,7 @@ class Graph {
       let start = found = rule.instances[instanceKey] = cx.node()
       let end = cx.node("end")
       if (rule.context || rule.tokenType) {
-        let push = this.node("push")
+        let push = cx.node("push")
         this.edge(start, push, null, [new PushContext(name, rule.context, rule.tokenType)])
         start = push
       }
@@ -312,6 +312,8 @@ function generateExpr(start, end, expr, cx) {
     graph.edge(start, end, last ? new StringMatch(last) : nullMatch)
   } else if (t == "AnyMatch") {
     graph.edge(start, end, anyMatch)
+  } else if (t == "DotMatch") {
+    graph.edge(start, end, dotMatch)
   } else if (t == "RuleIdentifier") {
     cx.call(start, end, expr.id.name, expr.arguments.map(arg => compileSingleExpr(arg, cx)))
   } else if (t == "RepeatedMatch") {
