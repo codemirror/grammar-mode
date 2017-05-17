@@ -473,7 +473,7 @@ function isCalledOnlyOnce(graph, node) {
     for (let i = 0; i < edges.length; i++) {
       let to = edges[i].to
       if (!to) returnNodes.push(cur)
-      else if (localNodes.indexOf(to) == -1) localNodes.push(to)
+      else if (localNodes.indexOf(to) == -1 && !edges[i].effects.some(e => e instanceof CallEffect)) localNodes.push(to)
     }
   }
 
