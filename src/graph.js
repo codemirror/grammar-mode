@@ -560,8 +560,45 @@ function mergeDuplicates(graph) {
   }
 }
 
+function checkForCycles(graph) {
+  function addCalls(stack, edge) {
+    let copy = null
+    for (let i = 0; i < edge.effects.length; i++) {
+      let effect = edge.effects[i]
+      if (effect instanceof CallEffect)
+        (copy || (copy = stack.slice())).push(effect.returnTo)
+    }
+    return copy || stack
+  }
+
+  function scan(path, node, stack) {
+    let edges = graph.nodes[node]
+    for (let i = 0; i < edges.length; i++) {
+      let edge = edges[i]
+      if (!edge.match.isNull) continue
+      let next = edge.to, stackHere = stack
+      if (!next && stackHere.length) {
+        stackHere = stackHere.slice()
+        next = stackHere.pop()
+      }
+      if (next) {
+        let newStack = addCalls(stackHere, edge)
+        for (let j = 0; j < path.length; j += 2) {
+          if (path[j] == next && path[j + 1] <= newStack.length)
+            throw new Error("Null-match cycle " + path.slice(j).filter(v => typeof v == "string").join(" → ")
+                            + " → " + next + " in " + graph)
+        }
+        scan(path.concat(next, newStack.length), next, addCalls(stackHere, edge))
+      }
+    }
+  }
+
+  for (let n in graph.nodes) scan([n], n, [])
+}
+
 exports.buildGraph = function(grammar, options) {
   let graph = new Graph(grammar, options)
   simplify(graph)
+  checkForCycles(graph)
   return graph
 }
