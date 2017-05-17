@@ -398,26 +398,38 @@ function sameEffect(edge1, edge2) {
   return true
 }
 
-function simplifyChoice(graph, node, edges) {
-  if (edges.length < 2) return false
-  let first = edges[0], elseEdge = null
-  if (first.match.isNull) return false
-  for (let i = 1; i < edges.length; i++) {
-    let edge = edges[i]
-    if (edge.match.isNull && i == edges.length - 1)
-      elseEdge = edge
-    else if (edge.to != first.to || !sameEffect(first, edge) || edge.match.isNull || edge.match.isolated)
-      return false
+function simplifyChoice(strict, _graph, _node, edges) {
+  let changed = false
+  for (let from = 0; from < edges.length - 1; from++) {
+    if (strict && from > 0) break
+    let first = edges[from], to = from + 1
+    if (first.match.isNull) continue
+    if (!first.match.isolated) for (; to < edges.length; to++) {
+      let edge = edges[to]
+      if (edge.to != first.to || !sameEffect(first, edge) || edge.match.isNull || edge.match.isolated)
+        break
+    }
+    if (strict && to < edges.length - 1) break
+    let choices = to - from, match = first.match
+    for (let j = 1; j < choices; j++) match = ChoiceMatch.create(match, edges[j].match)
+    let next = to < edges.length && edges[to]
+    if (next && next.match.isNull && next.to == first.to && sameEffect(first, next)) {
+      to++
+      match = new RepeatMatch(match, "?")
+    }
+    if (to > from + 1) {
+      edges.splice(from, to - from, new Edge(first.to, match, first.effects))
+      changed = true
+    }
   }
-  let choices = edges.length - (elseEdge ? 1 : 0)
-  if (choices > 1 && first.match.isolated) return false
-  let match = first.match
-  for (let i = 1; i < choices; i++) match = ChoiceMatch.create(match, edges[i].match)
-  if (elseEdge && elseEdge.to == first.to && sameEffect(first, elseEdge))
-    graph.nodes[node] = [new Edge(first.to, new RepeatMatch(match, "?"), first.effects)]
-  else
-    graph.nodes[node] = [new Edge(first.to, match, first.effects), ...elseEdge ? [elseEdge] : []]
-  return true
+  return changed
+}
+
+function simplifyChoiceStrict(graph, node, edges) {
+  return simplifyChoice(true, graph, node, edges)
+}
+function simplifyChoiceLoose(graph, node, edges) {
+  return simplifyChoice(false, graph, node, edges)
 }
 
 function simplifyRepeat(graph, node, edges) {
@@ -516,13 +528,14 @@ function simplifyWith(graph, simplifier) {
 // FIXME maybe add a non-total-simplifyChoice variant when the others no longer match?
 function simplify(graph) {
   for (;;) {
-    while (simplifyWith(graph, simplifyChoice) |
+    while (simplifyWith(graph, simplifyChoiceStrict) |
            simplifyWith(graph, simplifyRepeat) |
            simplifyWith(graph, simplifyLookahead) |
            simplifyWith(graph, simplifySequence)) {}
     graph.gc()
     mergeDuplicates(graph)
-    if (!simplifyWith(graph, simplifyCall)) break
+    if (!(simplifyWith(graph, simplifyChoiceLoose) |
+          simplifyWith(graph, simplifyCall))) break
   }
 }
 
