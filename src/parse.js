@@ -29,8 +29,10 @@ function parseRule(p, rules, isToken, skip) {
   node.skip = skip
   node.id = p.parseIdent(true)
   node.params = []
-  if (p.eat(tt.parenL)) while (!p.eat(tt.parenR))
+  if (p.eat(tt.parenL)) while (!p.eat(tt.parenR)) {
+    if (node.params.length) p.expect(tt.comma)
     node.params.push(p.parseIdent(true))
+  }
   if (isToken && node.params.length > 0)
     p.raise(node.params[0].start, "Token rules must not take parameters")
   if (node.id.name in rules)
@@ -79,8 +81,10 @@ function parseExprInner(p) {
     }
     node.id = p.parseIdent(true)
     node.arguments = []
-    if (p.start == p.lastTokEnd && p.eat(tt.parenL)) while (!p.eat(tt.parenR))
+    if (p.start == p.lastTokEnd && p.eat(tt.parenL)) while (!p.eat(tt.parenR)) {
+      if (node.arguments.length) p.expect(tt.comma)
       node.arguments.push(parseExprChoice(p))
+    }
     return p.finishNode(node, "RuleIdentifier")
   }
 }
@@ -111,7 +115,7 @@ function parseExprLookahead(p) {
 }
 
 function endOfSequence(p) {
-  return p.type == tt.braceR || p.type == tt.parenR || p.type == tt.bitwiseOR || p.type == tt.braceL
+  return p.type == tt.braceR || p.type == tt.parenR || p.type == tt.bitwiseOR || p.type == tt.braceL || p.type == tt.comma
 }
 
 function parseExprSequence(p) {
