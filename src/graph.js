@@ -214,7 +214,7 @@ class Edge {
   }
 
   toString(from) {
-    let result = `${from} -> ${this.to || "NULL"}`, label = this.match.regexp()
+    let result = `${from || ""} -> ${this.to || "NULL"}`, label = this.match.regexp()
     if (this.effects.length) label = (label ? label + " " : "") + this.effects.join(" ")
     if (label) result += `[label=${JSON.stringify(label)}]`
     return result
@@ -367,8 +367,6 @@ function simplifySequence(graph, node, edges) {
     if (first.to == node || first.to == graph.start || !first.to) continue
     let next = graph.nodes[first.to]
     if (next.length != 1) continue
-    for (let j = 0; j < edges.length; j++)
-      if (j != i && edges[j].to == first.to) continue outer
     let second = next[0], end = second.to, effects
     if (end == first.to ||
         (!first.match.isNull && (second.match.isolated || second.effects.some(e => e instanceof PushContext))) ||
@@ -450,6 +448,7 @@ function simplifyRepeat(graph, node, edges) {
   return true
 }
 
+// FIXME this will inline (negative) lookaheads that match newlines
 function simplifyLookahead(graph, _node, edges) {
   for (let i = 0; i < edges.length; i++) {
     let edge = edges[i]
@@ -480,13 +479,14 @@ function isCalledOnlyOnce(graph, node) {
   return called == 1 && returnNodes.length ? returnNodes : null
 }
 
+// FIXME this is very quadratic
 function simplifyCall(graph, _node, edges) {
   for (let i = 0; i < edges.length; i++) {
     let edge = edges[i], last = true
     for (let j = edge.effects.length - 1; j >= 0; j--) {
       let effect = edge.effects[j], returnNodes
       if (!(effect instanceof CallEffect)) continue
-      if (last && (returnNodes = isCalledOnlyOnce(graph, edge.to))) { // FIXME this is very quadratic
+      if (last && edge.to && (returnNodes = isCalledOnlyOnce(graph, edge.to))) {
         edges[i] = new Edge(edge.to, edge.match, rm(edge.effects, j))
         for (let k = 0; k < returnNodes.length; k++) {
           let edges = graph.nodes[returnNodes[k]]
@@ -515,6 +515,21 @@ function simplifyCall(graph, _node, edges) {
   }
 }
 
+function simplifyNullEdge(graph, _node, edges) {
+  let changed = false
+  for (let i = 0; i < edges.length - 1; i++) {
+    let edge = edges[i]
+    if (edge.match != nullMatch || !edge.to) continue
+    let newEdges = graph.nodes[edge.to].map(next => {
+      return new Edge(next.to, next.match, edge.effects.concat(next.effects))
+    })
+    edges.splice(i, 1, ...newEdges)
+    i += newEdges.length - 1
+    changed = true
+  }
+  return changed
+}
+
 // Look for simplification possibilities around the given node, return
 // true if anything was done
 function simplifyWith(graph, simplifier) {
@@ -535,6 +550,7 @@ function simplify(graph) {
     graph.gc()
     mergeDuplicates(graph)
     if (!(simplifyWith(graph, simplifyChoiceLoose) |
+          simplifyWith(graph, simplifyNullEdge) |
           simplifyWith(graph, simplifyCall))) break
   }
 }
