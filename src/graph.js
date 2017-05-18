@@ -335,7 +335,7 @@ function generateExpr(start, end, expr, cx) {
     let before = cx.node("lookahead"), after = cx.node("lookahead_end")
     generateExpr(before, after, expr.expr, cx)
     graph.edge(after, null, null, [returnEffect])
-    graph.edge(start, end, new LookaheadMatch(before, t.kind == "~"))
+    graph.edge(start, end, new LookaheadMatch(before, expr.kind == "~"))
   } else if (t == "SequenceMatch") {
     for (let i = 0; i < expr.exprs.length; i++) {
       let next = end, to = next, cur = expr.exprs[i]
