@@ -1,9 +1,8 @@
 const {nullMatch, anyMatch, dotMatch, StringMatch, RangeMatch, SeqMatch, ChoiceMatch, RepeatMatch,
        LookaheadMatch, SimpleLookaheadMatch, eqArray} = require("./matchexpr")
+const reserved = require("./reserved")
 
 const none = [], noParams = Object.create(null)
-
-const reserved = {start: true, token: true, state: true, exports: true, noop: true}
 
 class Rule {
   constructor(name, ast) {

@@ -1,18 +1,50 @@
 const {CallEffect, PushContext} = require("./graph")
-const {nullMatch, LookaheadMatch} = require("./matchexpr")
+const {nullMatch, LookaheadMatch, eqArray} = require("./matchexpr")
+const reserved = require("./reserved")
 
-// FIXME reuse regexps when longer then a handful of chars
+function buildEdgeInfo(graph) {
+  let edgeList = [], vars = Object.create(null)
+  function createVar(base) {
+    for (let i = 0;; i++) {
+      let name = base + "_" + i
+      if (!(name in vars) && !reserved.hasOwnProperty(name) && !(name in graph.nodes)) {
+        vars[name] = true
+        return name
+      }
+    }
+  }
 
-function compileEdge(edge) {
-  let parts = [], body = "", result = null
-  if (edge.match instanceof LookaheadMatch)
-    parts.push(`lookahead: ${JSON.stringify(edge.match.start)}, type: ${edge.match.positive ? `"~"` : `"!"`}`)
-  else if (edge.match != nullMatch)
-    parts.push(`match: /^(?:${edge.match.regexp()})/`)
-  for (let i = 0; i < edge.effects.length; i++) {
-    let effect = edge.effects[i]
+  for (let n in graph.nodes) {
+    let edges = graph.nodes[n]
+    for (let i = 0; i < edges.length; i++) {
+      let {match, effects, to} = edges[i]
+      let regexp = match instanceof LookaheadMatch || match == nullMatch ? null : `/^(?:${match.regexp()})/`
+      let useRegexp = null, useEffects = null
+      for (let j = 0; j < edgeList.length; j++) {
+        let other = edgeList[j]
+        if (useRegexp == null && regexp && regexp.length > 8 && other.regexp == regexp)
+          useRegexp = other.useRegexp || (other.useRegexp = createVar("re"))
+        if (useEffects == null && other.to == to && other.effects && eqArray(effects, other.effects))
+          useEffects = other.useEffects || (other.useEffects = createVar("apply"))
+      }
+      edgeList.push({
+        regexp: useRegexp == null ? regexp : null,
+        useRegexp,
+        effects: useEffects == null ? effects : null,
+        to,
+        useEffects
+      })
+    }
+  }
+  return edgeList
+}
+
+function generateApply(effects, to) {
+  let body = "", result = null
+  for (let i = 0; i < effects.length; i++) {
+    let effect = effects[i]
     if (effect instanceof CallEffect) {
-      let next = effect.hasContext && i < edge.effects.length - 1 && edge.effects[i + 1]
+      let next = effect.hasContext && i < effects.length - 1 && effects[i + 1]
       if (next && next instanceof PushContext && next.context) {
         body += `  state.pushContext(${JSON.stringify(next.name)}${!next.value ? "" : ", " + JSON.stringify(next.value)})\n`
         i++
@@ -25,27 +57,38 @@ function compileEdge(edge) {
         result = effect.tokenType
     }
   }
-  if (edge.to)
-    body += `  state.push(${edge.to})\n`
-  if (result)
-    body += `  return ${JSON.stringify(result)}\n`
-  parts.push("apply: " + (body ? "function(state) {\n" + body + "}" : needNoop = "noop"))
-  return "{" + parts.join(", ") + "}"
+  if (to) body += `  state.push(${to})\n`
+  if (result) body += `  return ${JSON.stringify(result)}\n`
+  return `function(state) {\n${body}}`
 }
 
-let needNoop = false
+function compileEdge(edge, edgeInfo) {
+  let parts = []
+  if (edge.match instanceof LookaheadMatch) {
+    parts.push(`lookahead: ${JSON.stringify(edge.match.start)}, type: ${edge.match.positive ? `"~"` : `"!"`}`)
+  } else if (edge.match != nullMatch) {
+    parts.push(`match: ${edgeInfo.useRegexp || edgeInfo.regexp}`)
+  }
+  parts.push(`apply: ${edgeInfo.useEffects || generateApply(edge.effects, edge.to)}`)
+  return `{${parts.join(", ")}}`
+}
 
 module.exports = function(graph, options = {}) {
-  let code = "", nodes = []
-  needNoop = false
+  let code = "", vars = []
 
-  for (let name in graph.nodes) {
-    let edges = graph.nodes[name]
-    nodes.push(`${name} = [${JSON.stringify(name)},\n${edges.map(compileEdge).join(",\n")}]`)
+  let edgeInfo = buildEdgeInfo(graph)
+  for (let i = 0; i < edgeInfo.length; i++) {
+    let info = edgeInfo[i]
+    if (info.useRegexp && info.regexp)
+      vars.push(`${info.useRegexp} = ${info.regexp}`)
+    if (info.useEffects && info.effects)
+      vars.push(`${info.useEffects} = ${generateApply(info.effects, info.to)}`)
   }
-  code += `var ${nodes.join(",\n")}\n`
+  let edgeIndex = 0
+  for (let name in graph.nodes)
+    vars.push(`${name} = [${JSON.stringify(name)},\n${graph.nodes[name].map(edge => compileEdge(edge, edgeInfo[edgeIndex++])).join(",\n")}]`)
 
-  if (needNoop) code += `function noop(){}\n`
+  code += `var ${vars.join(",\n")}\n`
 
   if (options.esModule) {
     code += `export var start = ${graph.start}\n`
