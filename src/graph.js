@@ -295,20 +295,27 @@ function generateExpr(start, end, expr, cx) {
   if (t == "CharacterRange") {
     graph.edge(start, end, new RangeMatch(expr.from, expr.to))
   } else if (t == "StringMatch") {
-    let separated = expr.value.split(/\n\r?|\r/)
-    for (let i = 0; i < separated.length - 1; i++) {
-      let line = separated[i]
-      if (line) {
+    let str = expr.value.replace(/\n\r?|\r/g, "\n"), pos = 0
+    for (;;) {
+      let next = str.indexOf("\n", pos)
+      if (next == -1) {
+        graph.edge(start, end, new StringMatch(str.slice(pos)))
+        break
+      }
+      if (next > pos) {
         let after = cx.node()
-        graph.edge(start, after, new StringMatch(line))
+        graph.edge(start, after, new StringMatch(str.slice(pos, next)))
         start = after
+      }
+      if (next == str.length - 1) {
+        graph.edge(start, end, new StringMatch("\n"))
+        break
       }
       let after = cx.node()
       graph.edge(start, after, new StringMatch("\n"))
       start = after
+      pos = next + 1
     }
-    let last = separated[separated.length - 1]
-    graph.edge(start, end, last ? new StringMatch(last) : nullMatch)
   } else if (t == "AnyMatch") {
     graph.edge(start, end, anyMatch)
   } else if (t == "DotMatch") {
@@ -618,7 +625,9 @@ function checkForCycles(graph) {
 
 exports.buildGraph = function(grammar, options) {
   let graph = new Graph(grammar, options)
-  simplify(graph)
-  checkForCycles(graph)
+  if (options.simplify !== false) {
+    simplify(graph)
+    checkForCycles(graph)
+  }
   return graph
 }

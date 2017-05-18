@@ -1,9 +1,10 @@
-let input = null, outputGraph = false, token = true, esModule = false, output = null
+let input = null, outputGraph = false, simplify = true, token = true, esModule = false, output = null
 
 for (let i = 2; i < process.argv.length; i++) {
   let arg = process.argv[i]
   if (arg == "--graph") outputGraph = true
   else if (arg == "--no-token") token = false
+  else if (arg == "--no-simplify") simplify = false
   else if (arg == "--es-module") esModule = true
   else if (arg == "--output") output = process.argv[++i]
   else if (arg == "--help") usage(0)
@@ -12,7 +13,7 @@ for (let i = 2; i < process.argv.length; i++) {
 }
 
 function usage(code) {
-  console.log("build-mode [file] [--output file] [--es-module] [--no-token] [--graph]")
+  console.log("build-mode [file] [--output file] [--es-module] [--no-token] [--graph] [--no-simplify]")
   process.exit(code)
 }
 
@@ -27,7 +28,7 @@ if (input) {
 
 function run(input) {
   let ast = require("./parse")(input)
-  let graph = require("./graph").buildGraph(ast, {token})
+  let graph = require("./graph").buildGraph(ast, {token, simplify})
   if (outputGraph)
     return graph.toString()
   else

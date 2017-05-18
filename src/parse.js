@@ -67,6 +67,7 @@ function parseExprInner(p) {
       p.next()
       return p.finishNode(node, "CharacterRange")
     } else {
+      if (value.length == 0) p.raise("Empty strings are not valid in grammars")
       node.value = value
       return p.finishNode(node, "StringMatch")
     }
