@@ -31,14 +31,19 @@ class State {
   }
 
   // FIXME profile whether this hack is actually faster than keeping an array
-  runMaybeUndoInner(str) {
+  runMaybeInner(str, maxSpeculate) {
     let nodePos = this.stack.length - 1, node = this.stack[nodePos], edge = matchEdge(node, str)
-    if (!edge) return -1
+    if (!edge) {
+      if (maxSpeculate == 0) return -1
+      maxSpeculate--
+      edge = node[node.length - 1]
+      charsTaken = 0
+    }
     this.stack.pop()
     this.popContext()
     tokenValue = edge.apply(this)
     if (charsTaken > 0) return charsTaken
-    let inner = this.runMaybeUndoInner(str)
+    let inner = this.runMaybeInner(str, maxSpeculate)
     if (inner == -1) {
       if (this.stack.length > nodePos) this.stack.length = nodePos
       this.stack[nodePos] = node
@@ -46,35 +51,20 @@ class State {
     return inner
   }
 
-  runMaybeUndo(str) {
+  runMaybe(str, maxSpeculate) {
     let context = this.context
-    let result = this.runMaybeUndoInner(str)
+    let result = this.runMaybeInner(str, maxSpeculate)
     if (result == -1) this.context = context
     return result
   }
 
-  runWithoutTop(n, str) {
-    if (n == 0) return this.runMaybeUndo(str)
-    let nodePos = this.stack.length - 1, node = this.stack[nodePos]
-    let result = this.runWithoutTop(n - 1, str)
-    if (result == -1) this.stack[nodePos] = node
-    return result
-  }
-
   forwardAndUnwind(str, tokenNode) {
-    for (let unwind = 0;;) {
-      let before = this.stack.slice()
-      let progress = this.runWithoutTop(unwind, str)
-      if (progress > 0) return progress
-
-      // No match way forward found, unwind if possible, match a generic token and try again otherwise
-      if (unwind < this.stack.length) {
-        unwind++
-      } else {
-        this.stack.push(tokenNode)
-        unwind = 0
-      }
+    let progress = this.runMaybe(str, 3)
+    if (progress < 0) {
+      this.stack.push(tokenNode)
+      progress = this.runMaybe(str, 0)
     }
+    return progress
   }
 
   push(node) {
