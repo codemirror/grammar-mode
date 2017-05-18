@@ -434,20 +434,12 @@ function simplifyChoiceLoose(graph, node, edges) {
 }
 
 function simplifyRepeat(graph, node, edges) {
-  if (node == graph.start) return
-  let cycleIndex, cycleEdge
-  for (let i = 0; i < edges.length; i++) {
-    let edge = edges[i]
-    if (edge.to == node && !edge.match.isolated && !edge.isNull) {
-      if (cycleEdge) return false
-      cycleIndex = i
-      cycleEdge = edge
-    }
-  }
-  if (!cycleEdge || cycleEdge.effects.length) return false
-  let newNode = graph.node(node, "split")
-  graph.nodes[newNode] = rm(edges, cycleIndex)
-  graph.nodes[node] = [new Edge(newNode, new RepeatMatch(cycleEdge.match, "*"), cycleEdge.effects)]
+  if (node == graph.start || edges.length != 2) return false
+  let first = edges[0]
+  if (first.to != node || first.effects.length > 0 || first.match.isolated) return false
+  let newNode = graph.node(node, "after")
+  graph.nodes[newNode] = [edges[1]]
+  graph.nodes[node] = [new Edge(newNode, new RepeatMatch(first.match, "*"))]
   return true
 }
 
