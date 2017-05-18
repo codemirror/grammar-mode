@@ -33,13 +33,12 @@ class State {
   forward(str) {
     for (;;) {
       let edge = matchEdge(this.stack[this.stack.length - 1], str)
-      if (!edge) return false
+      if (!edge) return -1
       this.stack.pop()
       this.popContext()
-      edge.apply(this)
+      tokenValue = edge.apply(this)
       if (charsTaken > 0) return charsTaken
     }
-    return -1
   }
 
   forwardAndUnwind(str, tokenNode) {
@@ -111,7 +110,6 @@ class State {
 
   token(stream, state) {
     let str = stream.string.slice(stream.pos)
-    tokenValue = null
     stream.pos += state.forwardAndUnwind(str, this.tokenNode)
     let tokenType = tokenValue
     if (stream.eol()) state.forwardAndUnwind("\n", this.tokenNode)
