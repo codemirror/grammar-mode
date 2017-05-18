@@ -30,53 +30,50 @@ class State {
     this.context = context
   }
 
-  forward(str) {
-    for (;;) {
-      let edge = matchEdge(this.stack[this.stack.length - 1], str)
-      if (!edge) return -1
-      this.stack.pop()
-      this.popContext()
-      tokenValue = edge.apply(this)
-      if (charsTaken > 0) return charsTaken
+  // FIXME profile whether this hack is actually faster than keeping an array
+  runMaybeUndoInner(str) {
+    let nodePos = this.stack.length - 1, node = this.stack[nodePos], edge = matchEdge(node, str)
+    if (!edge) return -1
+    this.stack.pop()
+    this.popContext()
+    tokenValue = edge.apply(this)
+    if (charsTaken > 0) return charsTaken
+    let inner = this.runMaybeUndoInner(str)
+    if (inner == -1) {
+      if (this.stack.length > nodePos) this.stack.length = nodePos
+      this.stack[nodePos] = node
     }
+    return inner
+  }
+
+  runMaybeUndo(str) {
+    let context = this.context
+    let result = this.runMaybeUndoInner(str)
+    if (result == -1) this.context = context
+    return result
+  }
+
+  runWithoutTop(n, str) {
+    if (n == 0) return this.runMaybeUndo(str)
+    let nodePos = this.stack.length - 1, node = this.stack[nodePos]
+    let result = this.runWithoutTop(n - 1, str)
+    if (result == -1) this.stack[nodePos] = node
+    return result
   }
 
   forwardAndUnwind(str, tokenNode) {
-    for (let depth = this.stack.length - 1;;) {
-      let edge = matchEdge(this.stack[depth], str)
-      matched: if (edge) {
-        let taken = charsTaken
-        if (depth == this.stack.length - 1) {
-          // Regular continuation of the current state
-          this.stack.pop()
-        } else if (taken > 0) {
-          // Unwinding some of the stack to continue after a mismatch.
-          // Can use this state object because we already know there's
-          // progress and we'll commit to this unwinding
-          this.stack.length = depth
-        } else {
-          // Speculatively forward with a copy of the state when
-          // encountering a null match during unwinding, since we only
-          // want to commit to it when it matches something
-          let copy = new State(this.stack.slice(0, depth + 1), this.context)
-          let forwarded = copy.forward(str)
-          if (forwarded > 0) {
-            this.stack = copy.stack
-            this.context = copy.context
-            return forwarded
-          } else {
-            break matched
-          }
-        }
-        this.popContext()
-        tokenValue = edge.apply(this)
-        if (taken > 0) return taken
-        depth = this.stack.length - 1
-        continue
+    for (let unwind = 0;;) {
+      let before = this.stack.slice()
+      let progress = this.runWithoutTop(unwind, str)
+      if (progress > 0) return progress
+
+      // No match way forward found, unwind if possible, match a generic token and try again otherwise
+      if (unwind < this.stack.length) {
+        unwind++
+      } else {
+        this.stack.push(tokenNode)
+        unwind = 0
       }
-      // No matching edge, unwind if possible, match a generic token and try again otherwise
-      if (depth) depth--
-      else depth = this.stack.push(tokenNode) - 1
     }
   }
 
