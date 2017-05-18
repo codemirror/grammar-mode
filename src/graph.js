@@ -522,21 +522,6 @@ function simplifyCall(graph, _node, edges) {
   }
 }
 
-function simplifyNullEdge(graph, _node, edges) {
-  let changed = false
-  for (let i = 0; i < edges.length - 1; i++) {
-    let edge = edges[i]
-    if (edge.match != nullMatch || !edge.to) continue
-    let newEdges = graph.nodes[edge.to].map(next => {
-      return maybeSimplifyReturn(new Edge(next.to, next.match, edge.effects.concat(next.effects)))
-    })
-    edges.splice(i, 1, ...newEdges)
-    i += newEdges.length - 1
-    changed = true
-  }
-  return changed
-}
-
 // Look for simplification possibilities around the given node, return
 // true if anything was done
 function simplifyWith(graph, simplifier) {
@@ -557,7 +542,6 @@ function simplify(graph) {
     graph.gc()
     mergeDuplicates(graph)
     if (!(simplifyWith(graph, simplifyChoiceLoose) |
-          simplifyWith(graph, simplifyNullEdge) |
           simplifyWith(graph, simplifyCall))) break
   }
 }
