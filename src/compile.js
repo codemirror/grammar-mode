@@ -1,5 +1,5 @@
 const {CallEffect, PushContext, popContext} = require("./graph")
-const {nullMatch, LookaheadMatch, ChoiceMatch, eqArray} = require("./matchexpr")
+const {nullMatch, LookaheadMatch, ChoiceMatch} = require("./matchexpr")
 const opcode = require("./opcode")
 
 function generateRe(match) {
