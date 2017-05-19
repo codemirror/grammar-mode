@@ -444,7 +444,6 @@ function simplifyRepeat(graph, node, edges) {
   return true
 }
 
-// FIXME this will inline (negative) lookaheads that match newlines
 function simplifyLookahead(graph, _node, edges) {
   for (let i = 0; i < edges.length; i++) {
     let edge = edges[i]
@@ -533,7 +532,6 @@ function simplifyWith(graph, simplifier) {
   return changed
 }
 
-// FIXME maybe add a non-total-simplifyChoice variant when the others no longer match?
 function simplify(graph) {
   for (;;) {
     while (simplifyWith(graph, simplifyChoiceStrict) |

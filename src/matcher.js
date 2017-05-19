@@ -23,8 +23,9 @@ class Stream {
 
 const MAX_LOOKAHEAD = 2
 
-function lookahead(stream, node, positive) {
-  let state = new State([node], null)
+function lookahead(stream, edge) {
+  let state = new State([edge.lookahead], null)
+  let positive = edge.type != "!"
   for (;;) {
     let taken = state.runMaybe(stream, 0)
     if (taken == -1) return !positive
@@ -41,7 +42,7 @@ const nullMatch = /(?=.)/.exec(" ")
 function matchEdge(node, stream, start) {
   for (let i = start; i < node.length; i++) {
     let edge = node[i]
-    if (edge.lookahead && lookahead(stream, edge.lookahead, edge.type != "!")) {
+    if (edge.lookahead && lookahead(stream, edge)) {
       charsTaken = 0
       return i
     }
@@ -101,8 +102,18 @@ class State {
       this.pop()
       tokenValue = node[match].apply(this)
       if (forbidDescent && this.stack.length > nodePos + 1) return -1
-      // FIXME try lone lookahead edges before returning
-      if (charsTaken > 0) return charsTaken
+      if (charsTaken > 0) {
+        // If the next node has a single out edge that's a lookahead,
+        // try it immediately. (This makes it possible to disambiguate
+        // ambiguous edges by adding a lookahead after them.)
+        let top = this.stack[this.stack.length - 1]
+        if (top && top.length - FIRST_EDGE == 1 && top[FIRST_EDGE].lookahead) {
+          if (!lookahead(stream.forward(charsTaken), top[FIRST_EDGE])) return -1
+          this.pop()
+          top[FIRST_EDGE].apply(this)
+        }
+        return charsTaken
+      }
 
       let inner = this.runMaybe(stream, curSkip, forbidDescent || (curSkip < maxSkip && this.stack.length <= nodePos))
       if (inner > -1) return inner
