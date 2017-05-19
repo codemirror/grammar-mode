@@ -24,8 +24,8 @@ class Stream {
 const MAX_LOOKAHEAD = 2
 
 function lookahead(stream, graph, value) {
-  let positive = value > 0
-  let state = new State([graph.nodes[positive ? value : -value]], null)
+  let positive = value[0] != "!"
+  let state = new State([value.slice(1)], null)
   for (;;) {
     let taken = state.runMaybe(stream, graph, 0)
     if (taken === -1) return !positive
@@ -42,7 +42,7 @@ const nullMatch = /(?=.)/.exec(" ")
 function matchEdge(node, stream, graph, start) {
   for (let i = start; i < node.length; i += 2) {
     let match = node[i]
-    if (typeof match === "number") { // Numbers encode lookahead
+    if (typeof match === "string") { // Strings encode lookahead
       if (lookahead(stream, graph, match)) {
         charsTaken = 0
         return i
@@ -90,7 +90,7 @@ class State {
     let context = this.context, nodePos = this.stack.length - 1
     // Machine finished. Can only happen during lookahead, since the main graph is cyclic.
     if (nodePos === -1) return 0
-    let node = this.stack[nodePos]
+    let nodeName = this.stack[nodePos], node = graph.nodes[nodeName]
     for (let i = 0;;) {
       let match = matchEdge(node, stream, graph, i), curSkip = maxSkip
       if (match === -1) {
@@ -100,17 +100,15 @@ class State {
         charsTaken = 0
       }
 
-      this.pop()
       tokenValue = this.apply(node[match + 1], graph)
       if (forbidDescent && this.stack.length > nodePos + 1) return -1
       if (charsTaken > 0) {
         // If the next node has a single out edge that's a lookahead,
         // try it immediately. (This makes it possible to disambiguate
         // ambiguous edges by adding a lookahead after them.)
-        let top = this.stack[this.stack.length - 1]
-        if (top && top.length === 2 && typeof top[0] === "number") {
+        let top = graph.nodes[this.stack[this.stack.length - 1]]
+        if (top && top.length === 2 && typeof top[0] === "string") {
           if (!lookahead(stream.forward(charsTaken), graph, top[0])) return -1
-          this.pop()
           this.apply(top[1], graph)
         }
         return charsTaken
@@ -123,7 +121,7 @@ class State {
       // Reset to state we started with
       this.context = context
       if (this.stack.length > nodePos) this.stack.length = nodePos
-      this.stack[nodePos] = node
+      this.stack[nodePos] = nodeName
 
       // Continue trying to match further edges in this node, if any
       if ((i = match + 2) === node.length) return -1
@@ -131,30 +129,29 @@ class State {
   }
 
   apply(code, graph) {
+    this.pop()
     for (let i = 0; i < code.length;) {
       let op = code[i++]
       if (op === 0) // PUSH node
-        this.stack.push(graph.nodes[code[i++]])
+        this.stack[this.stack.length] = code[i++]
       else if (op === 1) // ADD_CONTEXT name
         this.pushContext(code[i++])
       else if (op === 2) // ADD_TOKEN_CONTEXT name tokenType
         this.pushContext(code[i++], code[i++])
       else if (op === 3) // TOKEN tokenType
         return code[i++]
+      else
+        throw new Error("Unknown opcode " + op)
     }
   }
 
   forward(stream, graph) {
     let progress = this.runMaybe(stream, graph, 3)
     if (progress < 0) {
-      this.stack.push(graph.nodes[graph.token])
+      this.stack.push(graph.token)
       progress = this.runMaybe(stream, graph, 0)
     }
     return progress
-  }
-
-  push(node) {
-    this.stack[this.stack.length] = node
   }
 
   pushContext(name, tokenType) {
@@ -176,7 +173,7 @@ const startStream = new Stream(null, 0, "")
     this.graph = graph
   }
 
-  startState() { return new State([this.graph.nodes[this.graph.start]], null) }
+  startState() { return new State([this.graph.start], null) }
 
   copyState(state) { return new State(state.stack.slice(), state.context) }
 

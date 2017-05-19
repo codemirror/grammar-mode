@@ -8,7 +8,7 @@ function generateRe(match) {
   return `/^${re}/`
 }
 
-function buildEdgeInfo(graph, names) {
+function buildEdgeInfo(graph, nodeName) {
   let edgeList = [], regexpN = 0, codeN = 0
 
   for (let n in graph.nodes) {
@@ -16,7 +16,7 @@ function buildEdgeInfo(graph, names) {
     for (let i = 0; i < edges.length; i++) {
       let {match, effects, to} = edges[i]
       let regexp = match instanceof LookaheadMatch || match == nullMatch ? null : generateRe(match)
-      let code = generateCode(effects, to, names)
+      let code = generateCode(effects, to, nodeName)
       let useRegexp = -1, useCode = -1
       for (let j = 0; j < edgeList.length; j++) {
         let other = edgeList[j]
@@ -48,12 +48,12 @@ function isLocalPush(effects, index) {
   return false
 }
 
-function generateCode(effects, to, names) {
+function generateCode(effects, to, nodeName) {
   let codes = [], result = null
   for (let i = 0; i < effects.length; i++) {
     let effect = effects[i]
     if (effect instanceof CallEffect) {
-      codes.push(opcode.PUSH, names.indexOf(effect.returnTo))
+      codes.push(opcode.PUSH, nodeName(effect.returnTo))
     } else if (effect instanceof PushContext) {
       if (isLocalPush(effects, i)) {
         if (effect.tokenType)
@@ -66,15 +66,20 @@ function generateCode(effects, to, names) {
       }
     }
   }
-  if (to) codes.push(opcode.PUSH, names.indexOf(to))
+  if (to) codes.push(opcode.PUSH, nodeName(to))
   if (result) codes.push(opcode.TOKEN, JSON.stringify(result))
   return `[${codes.join(", ")}]`
 }
 
-function compileEdge(edge, edgeInfo, names) {
+function addToName(prefix, name) {
+  if (typeof name == "number") return JSON.stringify(prefix + name)
+  else return '"' + prefix + name.slice(1)
+}
+
+function compileEdge(edge, edgeInfo, nodeName) {
   let match, code
   if (edge.match instanceof LookaheadMatch)
-    match = `${edge.match.positive ? "" : "-"}${names.indexOf(edge.match.start)}`
+    match = addToName(edge.match.positive ? "~" : "!", nodeName(edge.match.start))
   else if (edge.match == nullMatch)
     match = "null"
   else if (edgeInfo.useRegexp != -1)
@@ -91,8 +96,11 @@ function compileEdge(edge, edgeInfo, names) {
 }
 
 module.exports = function(graph, options = {}) {
-  let names = Object.keys(graph.nodes)
-  let edgeInfo = buildEdgeInfo(graph, names)
+  let nodeName = options.names ? JSON.stringify : (() => {
+    let props = Object.keys(graph.nodes)
+    return x => props.indexOf(x)
+  })()
+  let edgeInfo = buildEdgeInfo(graph, nodeName)
 
   let regexpVector = [], codeVector = []
   for (let i = 0; i < edgeInfo.length; i++) {
@@ -105,12 +113,14 @@ module.exports = function(graph, options = {}) {
   if (regexpVector.length) code += `var re = [${regexpVector.join(", ")}]\n`
   if (codeVector.length) code += `var code = [${codeVector.join(", ")}]\n`
   let nodes = [], edgeIndex = 0
-  for (let name in graph.nodes)
-    nodes.push(`[${graph.nodes[name].map(edge => compileEdge(edge, edgeInfo[edgeIndex++], names)).join(",\n   ")}]`)
-  code += `${exp}nodes = [\n  ${nodes.join(",\n  ")}\n]\n`
-  if (options.names) code += `${exp}names = ${JSON.stringify(names)}\n`
-  code += `${exp}start = ${names.indexOf(graph.start)}\n`
-  code += `${exp}token = ${names.indexOf(graph.token)}\n`
+  for (let name in graph.nodes) {
+    let content = `[${graph.nodes[name].map(edge => compileEdge(edge, edgeInfo[edgeIndex++], nodeName)).join(",\n   ")}]`
+    if (options.names) nodes.push(`${name}: ${content}`)
+    else nodes.push(content)
+  }
+  code += `${exp}nodes = ${options.names ? "{" : "["}\n  ${nodes.join(",\n  ")}\n${options.names ? "}" : "]"}\n`
+  code += `${exp}start = ${nodeName(graph.start)}\n`
+  code += `${exp}token = ${nodeName(graph.token)}\n`
 
   return code
 }
