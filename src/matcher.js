@@ -1,8 +1,7 @@
 class Context {
-  constructor(name, value, depth, parent) {
+  constructor(name, tokenType, parent) {
     this.name = name
-    this.value = value
-    this.depth = depth
+    this.tokenType = tokenType
     this.parent = parent
   }
 }
@@ -17,7 +16,7 @@ class Stream {
   forward(taken) {
     if (taken < this.rest.length) return new Stream(this.inner, this.line, this.rest.slice(taken))
     if (this.rest != "\n") return new Stream(this.inner, this.line, "\n")
-    let line = this.line + 1, str = this.inner && this.inner.lookAhead(line)
+    let line = this.line + 1, str = this.inner && this.inner.lookAhead && this.inner.lookAhead(line)
     return str == null ? null : new Stream(this.inner, line, str)
   }
 }
@@ -98,14 +97,13 @@ class State {
         match = node.length - 1
         charsTaken = 0
       }
-      this.stack.pop()
-      this.popContext()
+
+      this.pop()
       tokenValue = node[match].apply(this)
       if (forbidDescent && this.stack.length > nodePos + 1) return -1
-      if (charsTaken > 0) {
-        // FIXME try lone lookahead edges before returning
-        return charsTaken
-      }
+      // FIXME try lone lookahead edges before returning
+      if (charsTaken > 0) return charsTaken
+
       let inner = this.runMaybe(stream, curSkip, forbidDescent || (curSkip < maxSkip && this.stack.length <= nodePos))
       if (inner > -1) return inner
 
@@ -132,11 +130,12 @@ class State {
     this.stack[this.stack.length] = node
   }
 
-  pushContext(name, value) {
-    this.context = new Context(name, value, this.stack.length, this.context)
+  pushContext(name, tokenType) {
+    this.context = new Context(name, tokenType, this.stack.length, this.context)
   }
 
-  popContext() {
+  pop() {
+    this.stack.pop()
     while (this.context && this.stack.length <= this.context.depth)
       this.context = this.context.parent
   }
