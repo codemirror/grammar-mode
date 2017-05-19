@@ -381,8 +381,10 @@ function simplifySequence(graph, node, edges) {
     if (next.length != 1) continue
     let second = next[0]
     if (second.to == first.to ||
-        (!first.match.isNull && (second.match.isolated || second.effects.some(e => e instanceof PushContext))) ||
-        (!second.match.isNull && (first.match.isolated || first.effects.indexOf(popContext) > -1)))
+        (first.match != nullMatch && second.match.isolated) ||
+        (second.match != nullMatch && first.match.isolated) ||
+        (!first.match.isNull && second.effects.some(e => e instanceof PushContext)) ||
+        (!second.match.isNull && first.effects.indexOf(popContext) > -1))
       continue
     edges[i] = maybeSimplifyReturn(new Edge(second.to, SeqMatch.create(first.match, second.match),
                                             first.effects.concat(second.effects)))
