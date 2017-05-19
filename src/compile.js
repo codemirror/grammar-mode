@@ -1,38 +1,35 @@
 const {CallEffect, PushContext, popContext} = require("./graph")
-const {nullMatch, LookaheadMatch, eqArray} = require("./matchexpr")
-const reserved = require("./reserved")
+const {nullMatch, LookaheadMatch, ChoiceMatch, eqArray} = require("./matchexpr")
+const opcode = require("./opcode")
 
-function buildEdgeInfo(graph) {
-  let edgeList = [], vars = Object.create(null)
-  function createVar(base) {
-    for (let i = 0;; i++) {
-      let name = base + "_" + i
-      if (!(name in vars) && !reserved.hasOwnProperty(name) && !(name in graph.nodes)) {
-        vars[name] = true
-        return name
-      }
-    }
-  }
+function generateRe(match) {
+  let re = match.regexp()
+  if (match instanceof ChoiceMatch) re = `(?:${re})`
+  return `/^${re}/`
+}
+
+function buildEdgeInfo(graph, names) {
+  let edgeList = [], regexpN = 0, codeN = 0
 
   for (let n in graph.nodes) {
     let edges = graph.nodes[n]
     for (let i = 0; i < edges.length; i++) {
       let {match, effects, to} = edges[i]
-      let regexp = match instanceof LookaheadMatch || match == nullMatch ? null : `/^(?:${match.regexp()})/`
-      let useRegexp = null, useEffects = null
+      let regexp = match instanceof LookaheadMatch || match == nullMatch ? null : generateRe(match)
+      let code = generateCode(effects, to, names)
+      let useRegexp = -1, useCode = -1
       for (let j = 0; j < edgeList.length; j++) {
         let other = edgeList[j]
-        if (useRegexp == null && regexp && regexp.length > 8 && other.regexp == regexp)
-          useRegexp = other.useRegexp || (other.useRegexp = createVar("re"))
-        if (useEffects == null && other.to == to && other.effects && eqArray(effects, other.effects))
-          useEffects = other.useEffects || (other.useEffects = createVar("apply"))
+        if (useRegexp == -1 && regexp && regexp.length > 8 && other.regexp == regexp)
+          useRegexp = other.useRegexp == -1 ? other.useRegexp = regexpN++ : other.useRegexp
+        if (useCode == -1 && other.code == code)
+          useCode = other.useCode == -1 ? other.useCode = codeN++ : other.useCode
       }
       edgeList.push({
-        regexp: useRegexp == null ? regexp : null,
+        regexp: useRegexp == -1 ? regexp : null,
         useRegexp,
-        effects: useEffects == null ? effects : null,
-        to,
-        useEffects
+        code: useCode == -1 ? code : null,
+        useCode
       })
     }
   }
@@ -51,59 +48,69 @@ function isLocalPush(effects, index) {
   return false
 }
 
-function generateApply(effects, to) {
-  let body = "", result = null
+function generateCode(effects, to, names) {
+  let codes = [], result = null
   for (let i = 0; i < effects.length; i++) {
     let effect = effects[i]
     if (effect instanceof CallEffect) {
-      body += `  state.push(${effect.returnTo})\n`
+      codes.push(opcode.PUSH, names.indexOf(effect.returnTo))
     } else if (effect instanceof PushContext) {
-      if (!isLocalPush(effects, i))
-        body += `  state.pushContext(${JSON.stringify(effect.name)}${!effect.tokenType ? "" : ", " + JSON.stringify(effect.tokenType)})\n`
-      else if (effect.tokenType)
-        result = (result ? result + " " : "") + effect.tokenType
+      if (isLocalPush(effects, i)) {
+        if (effect.tokenType)
+          result = (result ? result + " " : "") + effect.tokenType
+      } else {
+        if (effect.tokenType)
+          codes.push(opcode.ADD_TOKEN_CONTEXT, JSON.stringify(effect.name), JSON.stringify(effect.tokenType))
+        else
+          codes.push(opcode.ADD_CONTEXT, JSON.stringify(effect.name))
+      }
     }
   }
-  if (to) body += `  state.push(${to})\n`
-  if (result) body += `  return ${JSON.stringify(result)}\n`
-  return `function(state) {\n${body}}`
+  if (to) codes.push(opcode.PUSH, names.indexOf(to))
+  if (result) codes.push(opcode.TOKEN, JSON.stringify(result))
+  return `[${codes.join(", ")}]`
 }
 
-function compileEdge(edge, edgeInfo) {
-  let parts = []
-  if (edge.match instanceof LookaheadMatch) {
-    parts.push(`lookahead: ${edge.match.start}, type: ${edge.match.positive ? `"~"` : `"!"`}`)
-  } else if (edge.match != nullMatch) {
-    parts.push(`match: ${edgeInfo.useRegexp || edgeInfo.regexp}`)
-  }
-  parts.push(`apply: ${edgeInfo.useEffects || generateApply(edge.effects, edge.to)}`)
-  return `{${parts.join(", ")}}`
+function compileEdge(edge, edgeInfo, names) {
+  let match, code
+  if (edge.match instanceof LookaheadMatch)
+    match = `${edge.match.positive ? "" : "-"}${names.indexOf(edge.match.start)}`
+  else if (edge.match == nullMatch)
+    match = "null"
+  else if (edgeInfo.useRegexp != -1)
+    match = `re[${edgeInfo.useRegexp}]`
+  else
+    match = edgeInfo.regexp
+
+  if (edgeInfo.useCode != -1)
+    code = `code[${edgeInfo.useCode}]`
+  else
+    code = edgeInfo.code
+
+  return `${match}, ${code}`
 }
 
 module.exports = function(graph, options = {}) {
-  let code = "", vars = []
+  let names = Object.keys(graph.nodes)
+  let edgeInfo = buildEdgeInfo(graph, names)
 
-  let edgeInfo = buildEdgeInfo(graph)
+  let regexpVector = [], codeVector = []
   for (let i = 0; i < edgeInfo.length; i++) {
     let info = edgeInfo[i]
-    if (info.useRegexp && info.regexp)
-      vars.push(`${info.useRegexp} = ${info.regexp}`)
-    if (info.useEffects && info.effects)
-      vars.push(`${info.useEffects} = ${generateApply(info.effects, info.to)}`)
+    if (info.useRegexp > -1 && info.regexp) regexpVector[info.useRegexp] = info.regexp
+    if (info.useCode > -1 && info.code) codeVector[info.useCode] = info.code
   }
-  let edgeIndex = 0
+
+  let code = "", exp = options.esModule ? "export var " : "exports."
+  if (regexpVector.length) code += `var re = [${regexpVector.join(", ")}]\n`
+  if (codeVector.length) code += `var code = [${codeVector.join(", ")}]\n`
+  let nodes = [], edgeIndex = 0
   for (let name in graph.nodes)
-    vars.push(`${name} = [${JSON.stringify(name)},\n${graph.nodes[name].map(edge => compileEdge(edge, edgeInfo[edgeIndex++])).join(",\n")}]`)
-
-  code += `var ${vars.join(",\n")}\n`
-
-  if (options.esModule) {
-    code += `export var start = ${graph.start}\n`
-    if (graph.token) code += `export var token = ${graph.token}\n`
-  } else {
-    code += `exports.start = ${graph.start}\n`
-    if (graph.token) code += `exports.token = ${graph.token}\n`
-  }
+    nodes.push(`[${graph.nodes[name].map(edge => compileEdge(edge, edgeInfo[edgeIndex++], names)).join(",\n   ")}]`)
+  code += `${exp}nodes = [\n  ${nodes.join(",\n  ")}\n]\n`
+  if (options.names) code += `${exp}names = ${JSON.stringify(names)}\n`
+  code += `${exp}start = ${names.indexOf(graph.start)}\n`
+  code += `${exp}token = ${names.indexOf(graph.token)}\n`
 
   return code
 }

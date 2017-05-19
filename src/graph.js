@@ -1,6 +1,5 @@
 const {nullMatch, anyMatch, dotMatch, StringMatch, RangeMatch, SeqMatch, ChoiceMatch, RepeatMatch,
        LookaheadMatch, SimpleLookaheadMatch, eqArray} = require("./matchexpr")
-const reserved = require("./reserved")
 
 const none = [], noParams = Object.create(null)
 
@@ -102,7 +101,7 @@ class Graph {
     let label = base + (suffix ? "_" + suffix : "")
     for (let i = 0;; i++) {
       let cur = i ? label + "_" + i : label
-      if (!(cur in this.nodes) && !reserved.hasOwnProperty(cur)) {
+      if (!(cur in this.nodes)) {
         this.nodes[cur] = []
         return cur
       }
