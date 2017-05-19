@@ -7,14 +7,46 @@ class Context {
   }
 }
 
-let charsTaken = 0
-let nullMatch = /(?=.)/.exec(" ")
+class Stream {
+  constructor(inner, line, rest) {
+    this.inner = inner
+    this.line = line
+    this.rest = rest
+  }
 
-function matchEdge(node, str, start) {
+  forward(taken) {
+    if (taken < this.rest.length) return new Stream(this.inner, this.line, this.rest.slice(taken))
+    if (this.rest != "\n") return new Stream(this.inner, this.line, "\n")
+    let line = this.line + 1, str = this.inner && this.inner.lookAhead(line)
+    return str == null ? null : new Stream(this.inner, line, str)
+  }
+}
+
+const MAX_LOOKAHEAD = 2
+
+function lookahead(stream, node, positive) {
+  let state = new State([node], null)
+  for (;;) {
+    let taken = state.runMaybe(stream, 0)
+    if (taken == -1) return !positive
+    if (state.stack.length == 0) return positive
+    if (stream.line == MAX_LOOKAHEAD && stream.rest.length == taken) return !positive
+    stream = stream.forward(taken)
+    if (!stream) return !positive
+  }
+}
+
+let charsTaken = 0
+const nullMatch = /(?=.)/.exec(" ")
+
+function matchEdge(node, stream, start) {
   for (let i = start; i < node.length; i++) {
     let edge = node[i]
-    if (edge.lookahead) throw new Error("FIXME")
-    let match = edge.match ? edge.match.exec(str) : nullMatch
+    if (edge.lookahead && lookahead(stream, edge.lookahead, edge.type != "!")) {
+      charsTaken = 0
+      return i
+    }
+    let match = edge.match ? edge.match.exec(stream.rest) : nullMatch
     if (match) {
       charsTaken = match[0].length
       return i
@@ -48,11 +80,18 @@ class State {
   // Once a skipped edge has shortened the stack, `forbidDescent`
   // prevents further edges from growing the stack again, to avoid
   // entering random irrelevant rules through this mechanism.
-  runMaybe(str, maxSkip, forbidDescent) {
+  //
+  // Returns the amount of characters consumed, or -1 if no match was
+  // found. The amount will always be positive, unless the graph
+  // returned out of its last node, in which case it may return 0.
+  runMaybe(stream, maxSkip, forbidDescent) {
     // FIXME profile whether this hack is actually faster than keeping an array
-    let context = this.context, nodePos = this.stack.length - 1, node = this.stack[nodePos]
+    let context = this.context, nodePos = this.stack.length - 1
+    // Machine finished. Can only happen during lookahead, since the main graph is cyclic.
+    if (nodePos == -1) return 0
+    let node = this.stack[nodePos]
     for (let i = FIRST_EDGE;;) {
-      let match = matchEdge(node, str, i), curSkip = maxSkip
+      let match = matchEdge(node, stream, i), curSkip = maxSkip
       if (match == -1) {
         if (curSkip == 0) return -1
         curSkip--
@@ -67,7 +106,7 @@ class State {
         // FIXME try lone lookahead edges before returning
         return charsTaken
       }
-      let inner = this.runMaybe(str, curSkip, forbidDescent || (curSkip < maxSkip && this.stack.length <= nodePos))
+      let inner = this.runMaybe(stream, curSkip, forbidDescent || (curSkip < maxSkip && this.stack.length <= nodePos))
       if (inner > -1) return inner
 
       // Reset to start state
@@ -80,11 +119,11 @@ class State {
     }
   }
 
-  forward(str, tokenNode) {
-    let progress = this.runMaybe(str, 3)
+  forward(stream, tokenNode) {
+    let progress = this.runMaybe(stream, 3)
     if (progress < 0) {
       this.stack.push(tokenNode)
-      progress = this.runMaybe(str, 0)
+      progress = this.runMaybe(stream, 0)
     }
     return progress
   }
@@ -101,13 +140,12 @@ class State {
     while (this.context && this.stack.length <= this.context.depth)
       this.context = this.context.parent
   }
-
-  copy() {
-    return new State(this.stack.slice(), this.context)
-  }
 }
 
-(typeof exports == "object" ? exports : CodeMirror).GrammarMode = class GrammarMode {
+// Reused stream instance for regular, non-lookahead matching
+const startStream = new Stream(null, 0, "")
+
+;(typeof exports == "object" ? exports : CodeMirror).GrammarMode = class GrammarMode {
   constructor(config) {
     this.startNode = config.start
     this.tokenNode = config.token
@@ -115,17 +153,23 @@ class State {
 
   startState() { return new State([this.startNode], null) }
 
-  copyState(state) { return state.copy() }
+  copyState(state) { return new State(state.stack.slice(), state.context) }
 
   token(stream, state) {
-    let str = stream.string.slice(stream.pos)
-    stream.pos += state.forward(str, this.tokenNode)
+    startStream.inner = stream
+    startStream.rest = stream.string.slice(stream.pos)
+    stream.pos += state.forward(startStream, this.tokenNode)
     let tokenType = tokenValue
-    if (stream.eol()) state.forward("\n", this.tokenNode)
+    if (stream.eol()) {
+      startStream.rest = "\n"
+      state.forward(startStream, this.tokenNode)
+    }
     return tokenType
   }
 
   blankLine(state) {
-    state.forward("\n", this.tokenNode)
+    startStream.inner = null
+    startStream.rest = "\n"
+    state.forward(startStream, this.tokenNode)
   }
 }

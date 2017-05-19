@@ -65,7 +65,7 @@ function generateApply(effects, to) {
 function compileEdge(edge, edgeInfo) {
   let parts = []
   if (edge.match instanceof LookaheadMatch) {
-    parts.push(`lookahead: ${JSON.stringify(edge.match.start)}, type: ${edge.match.positive ? `"~"` : `"!"`}`)
+    parts.push(`lookahead: ${edge.match.start}, type: ${edge.match.positive ? `"~"` : `"!"`}`)
   } else if (edge.match != nullMatch) {
     parts.push(`match: ${edgeInfo.useRegexp || edgeInfo.regexp}`)
   }
