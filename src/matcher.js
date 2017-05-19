@@ -136,7 +136,7 @@ class State {
 
   pop() {
     this.stack.pop()
-    while (this.context && this.stack.length <= this.context.depth)
+    while (this.context && this.stack.length < this.context.depth)
       this.context = this.context.parent
   }
 }
@@ -159,6 +159,8 @@ const startStream = new Stream(null, 0, "")
     startStream.rest = stream.string.slice(stream.pos)
     stream.pos += state.forward(startStream, this.tokenNode)
     let tokenType = tokenValue
+    for (let cx = state.context; cx; cx = cx.parent)
+      if (cx.tokenType) tokenType = cx.tokenType + (tokenType ? " " + tokenType : "")
     if (stream.eol()) {
       startStream.rest = "\n"
       state.forward(startStream, this.tokenNode)

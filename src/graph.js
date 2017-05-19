@@ -7,7 +7,7 @@ const none = [], noParams = Object.create(null)
 class Rule {
   constructor(name, ast) {
     this.name = name
-    this.context = ast.context
+    this.context = ast.context || ast.tokenType
     this.tokenType = ast.tokenType
     this.skip = ast.skip
     this.expr = ast.expr
@@ -87,13 +87,13 @@ class Graph {
       let cx = new LexicalContext(this, name, paramsFor(rule.params, args), this.getSkipExpr(rule.skip))
       let start = found = rule.instances[instanceKey] = cx.node()
       let end = cx.node("end")
-      if (rule.context || rule.tokenType) {
-        let push = cx.node("push")
-        this.edge(start, push, null, [new PushContext(name, rule.context, rule.tokenType)])
-        start = push
-      }
       generateExpr(start, end, rule.expr, cx)
-      this.edge(end, null, null, rule.context || rule.tokenType ? [popContext, returnEffect] : [returnEffect])
+      if (rule.context) {
+        let edges = this.nodes[start], effect = new PushContext(name, rule.tokenType)
+        for (let i = 0; i < edges.length; i++)
+          edges[i].effects.unshift(effect)
+      }
+      this.edge(end, null, null, rule.context ? [popContext, returnEffect] : [returnEffect])
     }
     return found
   }
@@ -254,9 +254,8 @@ const returnEffect = exports.returnEffect = new class ReturnEffect {
 }
 
 const PushContext = exports.PushContext = class {
-  constructor(name, context, tokenType) {
+  constructor(name, tokenType) {
     this.name = name
-    this.context = context
     this.tokenType = tokenType
   }
   eq(other) { return other instanceof PushContext && other.name == this.name }
@@ -495,7 +494,7 @@ function simplifyCall(graph, _node, edges) {
     for (let j = edge.effects.length - 1; j >= 0; j--) {
       let effect = edge.effects[j], returnNodes
       if (!(effect instanceof CallEffect)) continue
-      if (last && edge.to && (returnNodes = isCalledOnlyOnce(graph, edge.to))) {
+      if (last && !effect.hasContext && edge.to && (returnNodes = isCalledOnlyOnce(graph, edge.to))) {
         edges[i] = new Edge(edge.to, edge.match, rm(edge.effects, j))
         for (let k = 0; k < returnNodes.length; k++) {
           let edges = graph.nodes[returnNodes[k]]

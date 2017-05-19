@@ -1,4 +1,4 @@
-const {CallEffect, PushContext} = require("./graph")
+const {CallEffect, PushContext, popContext} = require("./graph")
 const {nullMatch, LookaheadMatch, eqArray} = require("./matchexpr")
 const reserved = require("./reserved")
 
@@ -39,22 +39,29 @@ function buildEdgeInfo(graph) {
   return edgeList
 }
 
+function isLocalPush(effects, index) {
+  for (let depth = 0, i = index + 1; i < effects.length; i++) {
+    if (effects[i] instanceof PushContext) {
+      depth++
+    } else if (effects[i] == popContext) {
+      if (depth == 0) return true
+      depth--
+    }
+  }
+  return false
+}
+
 function generateApply(effects, to) {
   let body = "", result = null
   for (let i = 0; i < effects.length; i++) {
     let effect = effects[i]
     if (effect instanceof CallEffect) {
-      let next = effect.hasContext && i < effects.length - 1 && effects[i + 1]
-      if (next && next instanceof PushContext && next.context) {
-        body += `  state.pushContext(${JSON.stringify(next.name)}${!next.value ? "" : ", " + JSON.stringify(next.value)})\n`
-        i++
-      }
       body += `  state.push(${effect.returnTo})\n`
     } else if (effect instanceof PushContext) {
-      if (effect.context)
-        body += `  state.pushContext(${JSON.stringify(effect.name)}${!effect.value ? "" : ", " + JSON.stringify(effect.value)})\n`
-      else // FIXME does this work for token types spread across multiple edges?
-        result = effect.tokenType
+      if (!isLocalPush(effects, i))
+        body += `  state.pushContext(${JSON.stringify(effect.name)}${!effect.tokenType ? "" : ", " + JSON.stringify(effect.tokenType)})\n`
+      else if (effect.tokenType)
+        result = (result ? result + " " : "") + effect.tokenType
     }
   }
   if (to) body += `  state.push(${to})\n`
