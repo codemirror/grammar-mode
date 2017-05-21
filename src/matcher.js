@@ -14,6 +14,7 @@ class Stream {
   }
 
   forward(taken) {
+    if (taken === 0) return this
     if (taken < this.rest.length) return new Stream(this.inner, this.line, this.rest.slice(taken))
     if (this.rest !== "\n") return new Stream(this.inner, this.line, "\n")
     let line = this.line + 1, str = this.inner && this.inner.lookAhead && this.inner.lookAhead(line)
@@ -85,23 +86,22 @@ class State {
   // Returns the amount of characters consumed, or -1 if no match was
   // found. The amount will always be positive, unless the graph
   // returned out of its last node, in which case it may return 0.
-  runMaybe(stream, graph, maxSkip, forbidDescent) {
+  runMaybe(stream, graph, maxSkip) {
     // FIXME profile whether this hack is actually faster than keeping an array
     let context = this.context, nodePos = this.stack.length - 1
     // Machine finished. Can only happen during lookahead, since the main graph is cyclic.
     if (nodePos === -1) return 0
     let nodeName = this.stack[nodePos], node = graph.nodes[nodeName]
-    for (let i = 0;;) {
-      let match = matchEdge(node, stream, graph, i), curSkip = maxSkip
+    for (let i = 0, last = node.length - 2;;) {
+      let match = matchEdge(node, stream, graph, i), curSkip = i == last ? maxSkip : 0
       if (match === -1) {
-        if (curSkip === 0) return -1
-        curSkip--
-        match = node.length - 2
+        if (maxSkip === 0) return -1
+        curSkip = maxSkip - 1
+        match = last
         charsTaken = 0
       }
 
       tokenValue = this.apply(node[match + 1], graph)
-      if (forbidDescent && this.stack.length > nodePos + 1) return -1
       if (charsTaken > 0) {
         // If the next node has a single out edge that's a lookahead,
         // try it immediately. (This makes it possible to disambiguate
@@ -114,8 +114,7 @@ class State {
         return charsTaken
       }
 
-      let inner = this.runMaybe(stream, graph, curSkip,
-                                forbidDescent || (curSkip < maxSkip && this.stack.length <= nodePos))
+      let inner = this.runMaybe(stream, graph, curSkip)
       if (inner > -1) return inner
 
       // Reset to state we started with
@@ -124,7 +123,7 @@ class State {
       this.stack[nodePos] = nodeName
 
       // Continue trying to match further edges in this node, if any
-      if ((i = match + 2) === node.length) return -1
+      if ((i = match + 2) > last) return -1
     }
   }
 

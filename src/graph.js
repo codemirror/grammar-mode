@@ -433,6 +433,9 @@ function simplifyChoiceLoose(graph, node, edges) {
   return simplifyChoice(false, graph, node, edges)
 }
 
+// FIXME bring back agressive repeat simplification as a second-tier
+// simplifier, to fix things like comments being consumed one char at
+// a time
 function simplifyRepeat(graph, node, edges) {
   if (node == graph.start || edges.length != 2) return false
   let first = edges[0]
