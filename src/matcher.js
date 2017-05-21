@@ -1,7 +1,8 @@
 class Context {
-  constructor(name, tokenType, parent) {
+  constructor(name, tokenType, depth, parent) {
     this.name = name
     this.tokenType = tokenType
+    this.depth = depth
     this.parent = parent
   }
 }
@@ -18,7 +19,7 @@ class Stream {
     if (taken < this.rest.length) return new Stream(this.inner, this.line, this.rest.slice(taken))
     if (this.rest !== "\n") return new Stream(this.inner, this.line, "\n")
     let line = this.line + 1, str = this.inner && this.inner.lookAhead && this.inner.lookAhead(line)
-    return str === null ? null : new Stream(this.inner, line, str)
+    return str == null ? null : new Stream(this.inner, line, str)
   }
 }
 
@@ -93,25 +94,26 @@ class State {
     if (nodePos === -1) return 0
     let nodeName = this.stack[nodePos], node = graph.nodes[nodeName]
     for (let i = 0, last = node.length - 2;;) {
-      let match = matchEdge(node, stream, graph, i), curSkip = i == last ? maxSkip : 0
+      let match = matchEdge(node, stream, graph, i)
+      let taken = charsTaken, curSkip = i == last ? maxSkip : 0
       if (match === -1) {
         if (maxSkip === 0) return -1
         curSkip = maxSkip - 1
         match = last
-        charsTaken = 0
+        taken = 0
       }
 
       tokenValue = this.apply(node[match + 1], graph)
-      if (charsTaken > 0) {
+      if (taken > 0) {
         // If the next node has a single out edge that's a lookahead,
         // try it immediately. (This makes it possible to disambiguate
         // ambiguous edges by adding a lookahead after them.)
         let top = graph.nodes[this.stack[this.stack.length - 1]]
         if (top && top.length === 2 && typeof top[0] === "string") {
-          if (!lookahead(stream.forward(charsTaken), graph, top[0])) return -1
+          if (!lookahead(stream.forward(taken), graph, top[0])) return -1
           this.apply(top[1], graph)
         }
-        return charsTaken
+        return taken
       }
 
       let inner = this.runMaybe(stream, graph, curSkip)
