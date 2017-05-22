@@ -129,10 +129,6 @@ class State {
   // to keep only the old stack depth and the thing popped off to be
   // able to 'repair' it.
   //
-  // Once a skipped edge has shortened the stack, `forbidDescent`
-  // prevents further edges from growing the stack again, to avoid
-  // entering random irrelevant rules through this mechanism.
-  //
   // Returns the amount of characters consumed, or -1 if no match was
   // found. The amount will always be positive, unless the graph
   // returned out of its last node, in which case it may return 0.
