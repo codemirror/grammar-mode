@@ -144,7 +144,7 @@ class State {
     let nodeName = this.stack[nodePos], node = stream.graph.nodes[nodeName]
     for (let i = 0, last = node.length - 2;;) {
       let match = matchEdge(node, stream, i)
-      let taken = charsTaken, curSkip = i == last ? maxSkip : 0
+      let taken = charsTaken, curSkip = match == last ? maxSkip : 0
       if (match === -1) {
         if (maxSkip === 0) return -1
         curSkip = maxSkip - 1
