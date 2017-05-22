@@ -412,7 +412,7 @@ function simplifyChoice(strict, _graph, _node, edges) {
     }
     if (strict && to < edges.length - 1) break
     let choices = to - from, match = first.match
-    for (let j = 1; j < choices; j++) match = ChoiceMatch.create(match, edges[j].match)
+    for (let j = from + 1; j < to; j++) match = ChoiceMatch.create(match, edges[j].match)
     let next = to < edges.length && edges[to]
     if (next && next.match.isNull && next.to == first.to && sameEffect(first, next)) {
       to++
