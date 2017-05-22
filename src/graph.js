@@ -1,5 +1,5 @@
-const {nullMatch, anyMatch, dotMatch, StringMatch, RangeMatch, SeqMatch, ChoiceMatch, RepeatMatch,
-       LookaheadMatch, SimpleLookaheadMatch, eqArray} = require("./matchexpr")
+const {nullMatch, anyMatch, dotMatch, StringMatch, RangeMatch, SeqMatch,
+       ChoiceMatch, RepeatMatch, LookaheadMatch, eqArray} = require("./matchexpr")
 
 const none = [], noParams = Object.create(null)
 
@@ -136,8 +136,9 @@ class Graph {
       for (let i = 0; i < next.length; i++) {
         let edge = next[i]
         if (edge.to) reach(node, edge.to, "edge")
-        if (edge.match instanceof LookaheadMatch)
-          reach(node, edge.match.start, "lookahead")
+        edge.match.forEach(expr => {
+          if (expr instanceof LookaheadMatch && expr.start) reach(node, expr.start, "lookahead")
+        })
         for (let j = 0; j < edge.effects.length; j++)
           if (edge.effects[j] instanceof CallEffect)
             reach(node, edge.effects[j].returnTo, "return")
@@ -208,23 +209,16 @@ class Edge {
   merge(a, b) {
     if (this.to == b) this.to = a
     for (let i = 0; i < this.effects.length; i++) this.effects[i].merge(a, b)
-    if (this.match instanceof LookaheadMatch && this.match.start == b) this.match.start = a
+    this.match.forEach(expr => {
+      if (expr instanceof LookaheadMatch && expr.start === b) expr.start = a
+    })
   }
 
   toString(from) {
-    let result = `${from || ""} -> ${this.to || "NULL"}`, label = this.match.regexp()
+    let result = `${from || ""} -> ${this.to || "NULL"}`, label = this.match.toRegexp()
     if (this.effects.length) label = (label ? label + " " : "") + this.effects.join(" ")
     if (label) result += `[label=${JSON.stringify(label)}]`
     return result
-  }
-}
-
-function forAllExprs(e, f) {
-  f(e)
-  if (e.exprs) for (let i = 0; i < e.exprs.length; i++) forAllExprs(e.exprs[i], f)
-  if (e.expr) {
-    forAllExprs(e.expr, f)
-    if (e.type == "+") forAllExprs(e.expr, f) // The body of + is duplicated
   }
 }
 
@@ -379,8 +373,6 @@ function simplifySequence(graph, node, edges) {
     if (next.length != 1) continue
     let second = next[0]
     if (second.to == first.to ||
-        (first.match != nullMatch && second.match.isolated) ||
-        (second.match != nullMatch && first.match.isolated) ||
         (!first.match.isNull && second.effects.some(e => e instanceof PushContext)) ||
         (!second.match.isNull && first.effects.indexOf(popContext) > -1))
       continue
@@ -405,13 +397,13 @@ function simplifyChoice(strict, _graph, _node, edges) {
     if (strict && from > 0) break
     let first = edges[from], to = from + 1
     if (first.match.isNull) continue
-    if (!first.match.isolated) for (; to < edges.length; to++) {
+    for (; to < edges.length; to++) {
       let edge = edges[to]
-      if (edge.to != first.to || !sameEffect(first, edge) || edge.match.isNull || edge.match.isolated)
+      if (edge.to != first.to || !sameEffect(first, edge) || edge.match.isNull)
         break
     }
     if (strict && to < edges.length - 1) break
-    let choices = to - from, match = first.match
+    let match = first.match
     for (let j = from + 1; j < to; j++) match = ChoiceMatch.create(match, edges[j].match)
     let next = to < edges.length && edges[to]
     if (next && next.match.isNull && next.to == first.to && sameEffect(first, next)) {
@@ -439,7 +431,7 @@ function simplifyChoiceLoose(graph, node, edges) {
 function simplifyRepeat(graph, node, edges) {
   if (node == graph.start || edges.length != 2) return false
   let first = edges[0]
-  if (first.to != node || first.effects.length > 0 || first.match.isolated) return false
+  if (first.to != node || first.effects.length > 0) return false
   let newNode = graph.node(node, "after")
   graph.nodes[newNode] = [edges[1]]
   graph.nodes[node] = [new Edge(newNode, new RepeatMatch(first.match, "*"))]
@@ -447,14 +439,18 @@ function simplifyRepeat(graph, node, edges) {
 }
 
 function simplifyLookahead(graph, _node, edges) {
+  let changed = false
   for (let i = 0; i < edges.length; i++) {
-    let edge = edges[i]
-    if (!(edge.match instanceof LookaheadMatch)) continue
-    let out = graph.nodes[edge.match.start]
-    if (out.length != 1 || out[0].to || out[0].match.isolated) continue
-    edges[i] = new Edge(edge.to, new SimpleLookaheadMatch(out[0].match, edge.match.positive), edge.effects)
-    return true
+    edges[i].match.forEach(expr => {
+      if (!(expr instanceof LookaheadMatch) || expr.expr) return
+      let out = graph.nodes[expr.start]
+      if (out.length != 1 || out[0].to) return
+      expr.expr = out[0].match
+      expr.start = null
+      changed = true
+    })
   }
+  return changed
 }
 
 function isCalledOnlyOnce(graph, node) {

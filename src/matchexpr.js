@@ -6,70 +6,94 @@ function escRe(str) {
   })
 }
 
-class StringMatch {
+const OP_SEQ = 0, OP_CHOICE = 1,
+      OP_STAR = 2, OP_PLUS = 3, OP_MAYBE = 4,
+      OP_LOOKAHEAD = 5, OP_NEG_LOOKAHEAD = 6
+
+class MatchExpr {
+  constructor() {}
+
+  get isNull() { return false }
+  get simple() { return true }
+
+  toExpr() {
+    let re = this.toRegexp()
+    if (this instanceof SeqMatch) re = `(?:${re})`
+    return `/^${re}/`
+  }
+
+  forEach(f) { f(this) }
+}
+
+class StringMatch extends MatchExpr {
   constructor(string) {
+    super()
     this.string = string
   }
 
-  get isNull() { return false }
-
-  get isolated() { return this.string == "\n" }
+  get simple() { return this.string != "\n" }
 
   eq(other) { return other instanceof StringMatch && other.string == this.string }
 
-  regexp() { return escRe(this.string) }
+  toRegexp() { return escRe(this.string) }
+
+  toExpr() { return JSON.stringify(this.string) }
 }
 exports.StringMatch = StringMatch
 
-class RangeMatch {
+class RangeMatch extends MatchExpr {
   constructor(from, to) {
+    super()
     this.from = from
     this.to = to
   }
 
-  get isNull() { return false }
-
-  get isolated() { return this.from <= "\n" && this.to >= "\n" }
+  get simple() { return this.from > "\n" || this.to < "\n" }
 
   eq(other) { return other instanceof RangeMatch && other.from == this.from && other.to == this.to }
 
-  regexp() { return "[" + escRe(this.from) + "-" + escRe(this.to) + "]" }
+  toRegexp() { return "[" + escRe(this.from) + "-" + escRe(this.to) + "]" }
 }
 exports.RangeMatch = RangeMatch
 
-const anyMatch = exports.anyMatch = new class AnyMatch {
-  get isNull() { return false }
-  get isolated() { return true }
+const anyMatch = exports.anyMatch = new class AnyMatch extends MatchExpr {
+  get simple() { return false }
   eq(other) { return other == anyMatch }
-  regexp() { return "[^]" }
+  toRegexp() { return "[^]" }
 }
 
-const dotMatch = exports.dotMatch = new class DotMatch {
-  get isNull() { return false }
-  get isolated() { return false }
+const dotMatch = exports.dotMatch = new class DotMatch extends MatchExpr {
   eq(other) { return other == dotMatch }
-  regexp() { return "." }
+  toRegexp() { return "." }
 }
 
-const nullMatch = exports.nullMatch = new class NullMatch {
+const nullMatch = exports.nullMatch = new class NullMatch extends MatchExpr {
   get isNull() { return true }
-  get isolated() { return false }
   eq(other) { return other == anyMatch }
-  regexp() { return "" }
+  toRegexp() { return "" }
+  toExpr() { return "null" }
 }
 
-class SeqMatch {
+class SeqMatch extends MatchExpr {
   constructor(matches) {
+    super()
     this.matches = matches
   }
 
-  get isNull() { return false }
-
-  get isolated() { return false }
-
   eq(other) { return other instanceof SeqMatch && eqArray(other.matches, this.matches) }
 
-  regexp() { return this.matches.map(m => m.regexp()).join("") }
+  get simple() {
+    return this.matches.every(m => m.simple)
+  }
+
+  toRegexp() { return this.matches.map(m => m.toRegexp()).join("") }
+
+  toExpr(nodeName) {
+    if (this.simple) return super.toExpr()
+    return `[${OP_SEQ}, ${this.matches.map(m => m.toExpr(nodeName)).join(", ")}]`
+  }
+
+  forEach(f) { f(this); this.matches.forEach(m => m.forEach(f)) }
 
   static create(left, right) {
     if (left == nullMatch) return right
@@ -87,7 +111,7 @@ class SeqMatch {
         after[0] = new RepeatMatch(last, "+")
         before.pop()
       } else if (first.match instanceof StringMatch && last instanceof StringMatch &&
-                 new RegExp(first.match.regexp() + "$").test(last.string)) {
+                 new RegExp(first.match.toRegexp() + "$").test(last.string)) {
         after[0] = new RepeatMatch(first.match, "+")
         before[before.length - 1] = new StringMatch(last.string.slice(0, last.string.length - first.match.string.length))
       }
@@ -98,18 +122,17 @@ class SeqMatch {
 }
 exports.SeqMatch = SeqMatch
 
-class ChoiceMatch {
+class ChoiceMatch extends MatchExpr {
   constructor(matches) {
+    super()
     this.matches = matches
   }
 
-  get isNull() { return false }
-
-  get isolated() { return false }
+  get simple() { return this.matches.every(m => m.simple) }
 
   eq(other) { return other instanceof ChoiceMatch && eqArray(other.matches, this.matches) }
 
-  regexp() {
+  toRegexp() {
     let set = ""
     for (let i = 0; i < this.matches.length; i++) {
       let match = this.matches[i]
@@ -123,8 +146,15 @@ class ChoiceMatch {
       }
     }
     if (set != null) return "[" + set + "]"
-    return "(?:" + this.matches.map(m => m.regexp()).join("|") + ")"
+    return "(?:" + this.matches.map(m => m.toRegexp()).join("|") + ")"
   }
+
+  toExpr(nodeName) {
+    if (this.simple) return super.toExpr()
+    return `[${OP_CHOICE}, ${this.matches.map(m => m.toExpr(nodeName)).join(", ")}]`
+  }
+
+  forEach(f) { f(this); this.matches.forEach(m => m.forEach(f)) }
 
   static create(left, right) {
     let matches = []
@@ -137,60 +167,64 @@ class ChoiceMatch {
 }
 exports.ChoiceMatch = ChoiceMatch
 
-class RepeatMatch {
+class RepeatMatch extends MatchExpr {
   constructor(match, type) {
+    super()
     this.match = match
     this.type = type
   }
 
-  get isNull() { return false }
-
-  get isolated() { return false }
+  get simple() { return this.match.simple }
 
   eq(other) { return other instanceof RepeatMatch && this.match.eq(other.match) && this.type == other.type }
 
-  regexp() {
-    if (this.match instanceof SeqMatch) return "(?:" + this.match.regexp() + ")" + this.type
-    else return this.match.regexp() + this.type
+  toRegexp() {
+    if (this.match instanceof SeqMatch) return "(?:" + this.match.toRegexp() + ")" + this.type
+    else return this.match.toRegexp() + this.type
   }
+
+  toExpr(nodeName) {
+    if (this.simple) return super.toExpr()
+    return `[${this.type == "*" ? OP_STAR : this.type == "+" ? OP_PLUS : OP_MAYBE}, ${this.match.toExpr(nodeName)}]`
+  }
+
+  forEach(f) { f(this); this.match.forEach(f) }
 }
 exports.RepeatMatch = RepeatMatch
 
-class LookaheadMatch {
+class LookaheadMatch extends MatchExpr {
   constructor(start, positive) {
+    super()
     this.start = start
+    this.expr = null
     this.positive = positive
   }
 
   get isNull() { return true }
 
-  get isolated() { return true }
+  get simple() { return !!this.expr }
 
-  eq(other) { return other instanceof LookaheadMatch && other.start == this.start && other.positive == this.positive }
-
-  regexp() { // Not actually a regexp, but used for graph output
-    return "LOOKAHEAD(" + this.start + ")"
+  eq(other) {
+    return other instanceof LookaheadMatch && other.start == this.start &&
+      (this.expr ? other.expr && this.expr.eq(other.expr) : !other.expr) &&
+      other.positive == this.positive
   }
+
+  toRegexp() {
+    if (this.expr)
+      return `(?${this.positive ? "=" : "!"}${this.expr.toRegexp()})`
+    else // Not actually a regexp, but used for graph output
+      return "LOOKAHEAD(" + this.start + ")"
+  }
+
+  toExpr(nodeName) {
+    if (this.expr) return super.toExpr()
+    return `[${this.positive ? OP_LOOKAHEAD : OP_NEG_LOOKAHEAD}, ${nodeName(this.start)}]`
+  }
+
+  forEach(f) { f(this); if (this.expr) this.expr.forEach(f) }
 }
 exports.LookaheadMatch = LookaheadMatch
-
-class SimpleLookaheadMatch {
-  constructor(expr, positive) {
-    this.expr = expr
-    this.positive = positive
-  }
-
-  get isNull() { return true }
-
-  get isolated() { return false }
-
-  eq(other) { return other instanceof SimpleLookaheadMatch && other.expr.eq(this.expr) && other.positive == this.positive }
-
-  regexp() {
-    return "(?" + (this.positive ? "=" : "!") + this.expr.regexp() + ")"
-  }
-}
-exports.SimpleLookaheadMatch = SimpleLookaheadMatch
 
 let eqArray = exports.eqArray = function(a, b) {
   if (a.length != b.length) return false

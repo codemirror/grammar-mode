@@ -1,33 +1,27 @@
 const {CallEffect, PushContext, popContext} = require("./graph")
-const {nullMatch, LookaheadMatch, ChoiceMatch} = require("./matchexpr")
+const {nullMatch, LookaheadMatch} = require("./matchexpr")
 const opcode = require("./opcode")
 
-function generateRe(match) {
-  let re = match.regexp()
-  if (match instanceof ChoiceMatch) re = `(?:${re})`
-  return `/^${re}/`
-}
-
 function buildEdgeInfo(graph, nodeName) {
-  let edgeList = [], regexpN = 0, codeN = 0
+  let edgeList = [], exprN = 0, codeN = 0
 
   for (let n in graph.nodes) {
     let edges = graph.nodes[n]
     for (let i = 0; i < edges.length; i++) {
       let {match, effects, to} = edges[i]
-      let regexp = match instanceof LookaheadMatch || match == nullMatch ? null : generateRe(match)
+      let expr = match.toExpr(nodeName)
       let code = generateCode(effects, to, nodeName)
-      let useRegexp = -1, useCode = -1
+      let useExpr = -1, useCode = -1
       for (let j = 0; j < edgeList.length; j++) {
         let other = edgeList[j]
-        if (useRegexp == -1 && regexp && regexp.length > 8 && other.regexp == regexp)
-          useRegexp = other.useRegexp == -1 ? other.useRegexp = regexpN++ : other.useRegexp
+        if (useExpr == -1 && expr.length > 8 && other.expr == expr)
+          useExpr = other.useExpr == -1 ? other.useExpr = exprN++ : other.useExpr
         if (useCode == -1 && other.code == code)
           useCode = other.useCode == -1 ? other.useCode = codeN++ : other.useCode
       }
       edgeList.push({
-        regexp: useRegexp == -1 ? regexp : null,
-        useRegexp,
+        expr: useExpr == -1 ? expr : null,
+        useExpr,
         code: useCode == -1 ? code : null,
         useCode
       })
@@ -82,13 +76,13 @@ function compileEdge(edge, edgeInfo, nodeName) {
     match = addToName(edge.match.positive ? "~" : "!", nodeName(edge.match.start))
   else if (edge.match == nullMatch)
     match = "null"
-  else if (edgeInfo.useRegexp != -1)
-    match = `re[${edgeInfo.useRegexp}]`
+  else if (edgeInfo.useExpr != -1)
+    match = `e[${edgeInfo.useExpr}]`
   else
-    match = edgeInfo.regexp
+    match = edgeInfo.expr
 
   if (edgeInfo.useCode != -1)
-    code = `code[${edgeInfo.useCode}]`
+    code = `c[${edgeInfo.useCode}]`
   else
     code = edgeInfo.code
 
@@ -102,16 +96,16 @@ module.exports = function(graph, options = {}) {
   })()
   let edgeInfo = buildEdgeInfo(graph, nodeName)
 
-  let regexpVector = [], codeVector = []
+  let exprVector = [], codeVector = []
   for (let i = 0; i < edgeInfo.length; i++) {
     let info = edgeInfo[i]
-    if (info.useRegexp > -1 && info.regexp) regexpVector[info.useRegexp] = info.regexp
+    if (info.useExpr > -1 && info.expr) exprVector[info.useExpr] = info.expr
     if (info.useCode > -1 && info.code) codeVector[info.useCode] = info.code
   }
 
   let code = "", exp = options.esModule ? "export var " : "exports."
-  if (regexpVector.length) code += `var re = [${regexpVector.join(", ")}]\n`
-  if (codeVector.length) code += `var code = [${codeVector.join(", ")}]\n`
+  if (exprVector.length) code += `var e = [${exprVector.join(", ")}]\n`
+  if (codeVector.length) code += `var c = [${codeVector.join(", ")}]\n`
   let nodes = [], edgeIndex = 0
   for (let name in graph.nodes) {
     let content = `[${graph.nodes[name].map(edge => compileEdge(edge, edgeInfo[edgeIndex++], nodeName)).join(",\n   ")}]`

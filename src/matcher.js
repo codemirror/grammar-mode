@@ -7,55 +7,102 @@ class Context {
   }
 }
 
+const MAX_LOOKAHEAD_LINES = 2
+
 class Stream {
-  constructor(inner, line, rest) {
-    this.inner = inner
-    this.line = line
-    this.rest = rest
+  constructor() {
+    this.stream = null
+    this.graph = null
+    this.line = 0
+    this.string = ""
   }
 
-  forward(taken) {
-    if (taken === 0) return this
-    if (taken < this.rest.length) return new Stream(this.inner, this.line, this.rest.slice(taken))
-    if (this.rest !== "\n") return new Stream(this.inner, this.line, "\n")
-    let line = this.line + 1, str = this.inner && this.inner.lookAhead && this.inner.lookAhead(line)
-    return str == null ? null : new Stream(this.inner, line, str)
+  init(stream, graph) {
+    this.stream = stream
+    this.graph = graph
+    this.line = 0
+    this.string = stream ? stream.string.slice(stream.start) : "\n"
+    return this
+  }
+
+  ahead(n) {
+    for (;;) {
+      if (n <= this.string.length) return true
+      if (this.string.charAt(this.string.length - 1) !== 10) {
+        this.string += "\n"
+      } else if (this.line === MAX_LOOKAHEAD_LINES || !this.stream || !this.stream.lookAhead) {
+        return false
+      } else {
+        let next = this.stream.lookAhead(this.line + 1)
+        if (next == null) return false
+        this.string += next
+        this.line++
+      }
+    }
   }
 }
 
-const MAX_LOOKAHEAD = 2
-
-function lookahead(stream, graph, value) {
-  let positive = value[0] != "!"
-  let state = new State([value.slice(1)], null)
+function lookahead(stream, pos, start) {
+  let state = new State([start], null)
   for (;;) {
-    let taken = state.runMaybe(stream, graph, 0)
-    if (taken === -1) return !positive
-    if (state.stack.length === 0) return positive
-    if (stream.line === MAX_LOOKAHEAD && stream.rest.length === taken) return !positive
-    stream = stream.forward(taken)
-    if (!stream) return !positive
+    // FIXME implement custom scanning algorithm?
+    let taken = state.runMaybe(stream, 0, pos)
+    if (taken === -1) return false
+    if (state.stack.length === 0) return true
+    pos += taken
+  }
+}
+
+function matchExpr(expr, stream, pos) {
+  if (expr === null) return pos
+
+  if (typeof expr === "string") {
+    let end = pos + expr.length
+    return stream.ahead(end) && stream.string.slice(pos, end) === expr ? end : -1
+  }
+  if (expr.exec) {
+    let m = expr.exec(stream.string.slice(pos))
+    if (!m) return -1
+    return pos + m[0].length
+  }
+
+  let op = expr[0]
+  if (op === 0) { // OP_SEQ, ...rest
+    for (let i = 1; i < expr.length; i++) {
+      pos = matchExpr(expr[i], stream, pos)
+      if (pos < 0) return -1
+    }
+    return pos
+  } else if (op === 1) { // OP_CHOICE, ...rest
+    for (let i = 1, e = expr.length - 1;; i++) {
+      let cur = matchExpr(expr[i], stream, pos)
+      if (i === e || cur > -1) return cur
+    }
+    return -1
+  } else if (op === 2 || op === 3) { // OP_STAR/OP_PLUS, expr
+    if (op === 3 && (pos = matchExpr(expr[1], stream, pos)) < 0) return -1
+    for (;;) {
+      let inner = matchExpr(expr[1], stream, pos)
+      if (inner == -1) return pos
+      pos = inner
+    }
+  } else if (op === 4) { // OP_MAYBE, expr
+    return Math.max(matchExpr(expr[1], stream, pos), pos)
+  } else if (op === 5) { // OP_LOOKAHEAD, expr
+    return lookahead(stream, pos, expr[1]) ? pos : -1
+  } else if (op === 6) { // OP_NEG_LOOKAHEAD, expr
+    return lookahead(stream, pos, expr[1]) ? -1 : pos
+  } else {
+    throw new Error("Unknown match type " + expr)
   }
 }
 
 let charsTaken = 0
-const nullMatch = /(?=.)/.exec(" ")
 
-function matchEdge(node, stream, graph, start) {
+function matchEdge(node, stream, start) {
   for (let i = start; i < node.length; i += 2) {
-    let match = node[i]
-    if (typeof match === "string") { // Strings encode lookahead
-      if (lookahead(stream, graph, match)) {
-        charsTaken = 0
-        return i
-      }
-    } else { // Regexp or null
-      let result = match ? match.exec(stream.rest) : nullMatch
-      if (result) {
-        charsTaken = result[0].length
-        return i
-      }
-    }
+    charsTaken = matchExpr(node[i], stream, 0)
+    if (charsTaken > -1) return i
   }
   return -1
 }
@@ -87,14 +134,14 @@ class State {
   // Returns the amount of characters consumed, or -1 if no match was
   // found. The amount will always be positive, unless the graph
   // returned out of its last node, in which case it may return 0.
-  runMaybe(stream, graph, maxSkip) {
+  runMaybe(stream, maxSkip) {
     // FIXME profile whether this hack is actually faster than keeping an array
     let context = this.context, nodePos = this.stack.length - 1
     // Machine finished. Can only happen during lookahead, since the main graph is cyclic.
     if (nodePos === -1) return 0
-    let nodeName = this.stack[nodePos], node = graph.nodes[nodeName]
+    let nodeName = this.stack[nodePos], node = stream.graph.nodes[nodeName]
     for (let i = 0, last = node.length - 2;;) {
-      let match = matchEdge(node, stream, graph, i)
+      let match = matchEdge(node, stream, i)
       let taken = charsTaken, curSkip = i == last ? maxSkip : 0
       if (match === -1) {
         if (maxSkip === 0) return -1
@@ -103,20 +150,10 @@ class State {
         taken = 0
       }
 
-      tokenValue = this.apply(node[match + 1], graph)
-      if (taken > 0) {
-        // If the next node has a single out edge that's a lookahead,
-        // try it immediately. (This makes it possible to disambiguate
-        // ambiguous edges by adding a lookahead after them.)
-        let top = graph.nodes[this.stack[this.stack.length - 1]]
-        if (top && top.length === 2 && typeof top[0] === "string") {
-          if (!lookahead(stream.forward(taken), graph, top[0])) return -1
-          this.apply(top[1], graph)
-        }
-        return taken
-      }
+      tokenValue = this.apply(node[match + 1])
+      if (taken > 0) return taken
 
-      let inner = this.runMaybe(stream, graph, curSkip)
+      let inner = this.runMaybe(stream, curSkip)
       if (inner > -1) return inner
 
       // Reset to state we started with
@@ -129,7 +166,7 @@ class State {
     }
   }
 
-  apply(code, graph) {
+  apply(code) {
     this.pop()
     for (let i = 0; i < code.length;) {
       let op = code[i++]
@@ -146,11 +183,11 @@ class State {
     }
   }
 
-  forward(stream, graph) {
-    let progress = this.runMaybe(stream, graph, 3)
+  forward(stream) {
+    let progress = this.runMaybe(stream, 2)
     if (progress < 0) {
-      this.stack.push(graph.token)
-      progress = this.runMaybe(stream, graph, 0)
+      this.stack.push(stream.graph.token)
+      progress = this.runMaybe(stream, 0)
     }
     return progress
   }
@@ -167,7 +204,7 @@ class State {
 }
 
 // Reused stream instance for regular, non-lookahead matching
-const startStream = new Stream(null, 0, "")
+const streamObj = new Stream
 
 ;(typeof exports === "object" ? exports : CodeMirror).GrammarMode = class GrammarMode {
   constructor(graph) {
@@ -179,22 +216,16 @@ const startStream = new Stream(null, 0, "")
   copyState(state) { return new State(state.stack.slice(), state.context) }
 
   token(stream, state) {
-    startStream.inner = stream
-    startStream.rest = stream.string.slice(stream.pos)
-    stream.pos += state.forward(startStream, this.graph)
+    stream.pos += state.forward(streamObj.init(stream, this.graph))
     let tokenType = tokenValue
     for (let cx = state.context; cx; cx = cx.parent)
       if (cx.tokenType) tokenType = cx.tokenType + (tokenType ? " " + tokenType : "")
-    if (stream.eol()) {
-      startStream.rest = "\n"
-      state.forward(startStream, this.graph)
-    }
+    if (stream.eol())
+      state.forward(streamObj.init(null, this.graph))
     return tokenType
   }
 
   blankLine(state) {
-    startStream.inner = null
-    startStream.rest = "\n"
-    state.forward(startStream, this.graph)
+    state.forward(streamObj.init(null, this.graph))
   }
 }
