@@ -1,9 +1,11 @@
 class Context {
-  constructor(name, tokenType, depth, parent) {
+  constructor(name, tokenType, depth, parent, stream) {
     this.name = name
     this.tokenType = tokenType
     this.depth = depth
     this.parent = parent
+    this.startLine = stream ? stream.string : "\n"
+    this.startPos = stream ? stream.start : 0
   }
 }
 
@@ -150,7 +152,7 @@ class State {
         taken = 0
       }
 
-      tokenValue = this.apply(node[match + 1])
+      tokenValue = this.apply(node[match + 1], stream)
       if (taken > 0) return taken
 
       let inner = this.runMaybe(stream, curSkip)
@@ -166,16 +168,16 @@ class State {
     }
   }
 
-  apply(code) {
+  apply(code, stream) {
     this.pop()
     for (let i = 0; i < code.length;) {
       let op = code[i++]
       if (op === 0) // PUSH node
         this.stack[this.stack.length] = code[i++]
       else if (op === 1) // ADD_CONTEXT name
-        this.pushContext(code[i++])
+        this.pushContext(code[i++], null, stream.stream)
       else if (op === 2) // ADD_TOKEN_CONTEXT name tokenType
-        this.pushContext(code[i++], code[i++])
+        this.pushContext(code[i++], code[i++], stream.stream)
       else if (op === 3) // TOKEN tokenType
         return code[i++]
       else
@@ -192,8 +194,8 @@ class State {
     return progress
   }
 
-  pushContext(name, tokenType) {
-    this.context = new Context(name, tokenType, this.stack.length, this.context)
+  pushContext(name, tokenType, stream) {
+    this.context = new Context(name, tokenType, this.stack.length, this.context, stream)
   }
 
   pop() {
