@@ -4,6 +4,28 @@ const {tokTypes: tt, parse, plugins} = require("acorn")
 
 function parseGrammar(p, node) {
   node.rules = Object.create(null)
+  node.extends = null
+  node.included = []
+
+  for (;;) {
+    if (p.eat(tt._extends)) {
+      if (node.extends) p.raise("Can't extend multiple grammars")
+      p.expect(tt.string)
+      node.extends = p.value
+      p.next()
+    } else if (p.eatContextual("include")) {
+      let node = p.startNode()
+      p.expect(tt.string)
+      node.value = p.value
+      p.next()
+      p.expectContextual("as")
+      node.name = p.parseIdent(true)
+      node.included.push(p.finishNode(node, "IncludeDeclaration"))
+    } else {
+      break
+    }
+  }
+
   while (p.type != tt.eof) {
     if (p.eatContextual("skip")) {
       let skip = parseExprChoice(p)
@@ -71,6 +93,10 @@ function parseExprInner(p) {
       node.value = value
       return p.finishNode(node, "StringMatch")
     }
+  } else if (p.type == tt._super) {
+    let node = p.startNode()
+    p.next()
+    return p.finishNode(node, "SuperMatch")
   } else {
     let node = p.startNode()
     if (p.type == tt.name && p.value == "_") {

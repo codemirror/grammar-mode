@@ -1,5 +1,4 @@
 const {CallEffect, PushContext, popContext} = require("./graph")
-const {nullMatch, LookaheadMatch} = require("./matchexpr")
 const opcode = require("./opcode")
 
 function buildEdgeInfo(graph, nodeName) {
@@ -72,11 +71,7 @@ function addToName(prefix, name) {
 
 function compileEdge(edge, edgeInfo, nodeName) {
   let match, code
-  if (edge.match instanceof LookaheadMatch)
-    match = addToName(edge.match.positive ? "~" : "!", nodeName(edge.match.start))
-  else if (edge.match == nullMatch)
-    match = "null"
-  else if (edgeInfo.useExpr != -1)
+  if (edgeInfo.useExpr != -1)
     match = `e[${edgeInfo.useExpr}]`
   else
     match = edgeInfo.expr

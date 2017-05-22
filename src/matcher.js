@@ -1,3 +1,6 @@
+// FIXME profile this, to see how it compares to old-style modes and
+// to identify bottlenecks
+
 class Context {
   constructor(name, tokenType, depth, parent, stream) {
     this.name = name
