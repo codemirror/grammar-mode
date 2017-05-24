@@ -4,7 +4,7 @@ const {nullMatch, anyMatch, dotMatch, StringMatch, RangeMatch, SeqMatch,
 const none = [], noParams = Object.create(null)
 
 class Rule {
-  constructor(name, ast) {
+  constructor(name, ast, superGrammar) {
     this.name = name
     this.context = ast.context || ast.tokenType
     this.tokenType = ast.tokenType
@@ -12,15 +12,17 @@ class Rule {
     this.expr = ast.expr
     this.instances = Object.create(null)
     this.params = ast.params && ast.params.map(id => id.name)
+    this.superGrammar = superGrammar
   }
 }
 
 class LexicalContext {
-  constructor(graph, name, params, skip) {
+  constructor(graph, name, params, skip, superGrammar) {
     this.graph = graph
     this.name = name
     this.params = params
     this.skip = skip
+    this.superGrammar = superGrammar
   }
 
   node(suffix) {
@@ -38,6 +40,10 @@ class LexicalContext {
     }
     this.graph.edge(start, target, null, [new CallEffect(end, name, hasContext)])
   }
+
+  superCx(grammar) {
+    return new LexicalContext(this.graph, this.name, this.params, this.skip, grammar.super)
+  }
 }
 
 function paramsFor(params, args) {
@@ -54,18 +60,13 @@ class Graph {
     this.curName = null
     this.skipExprs = []
     this.rules = Object.create(null)
-    let first = null, tokens = []
-    for (let name in grammar.rules) {
-      if (first == null) first = name
-      let ast = grammar.rules[name]
-      this.rules[name] = new Rule(name, ast)
-      if (ast.isToken) tokens.push(name)
-    }
-    if (!first) throw new SyntaxError("Empty grammar")
+    let ruleInfo = {rules: this.rules, first: null, tokens: []}
+    gatherRules(grammar, ruleInfo)
 
-    this.start = this.buildStartNode(first)
+    if (!ruleInfo.first) throw new SyntaxError("Empty grammar")
+    this.start = this.buildStartNode(ruleInfo.first)
     if (this.options.token !== false)
-      this.token = this.buildTokenNode(tokens)
+      this.token = this.buildTokenNode(ruleInfo.tokens)
   }
 
   getSkipExpr(node) {
@@ -83,7 +84,7 @@ class Graph {
     if (rule.params.length != args.length) throw new SyntaxError(`Wrong number of arguments for rule '${name}'`)
     let instanceKey = args.join(" "), found = rule.instances[instanceKey]
     if (!found) {
-      let cx = new LexicalContext(this, name, paramsFor(rule.params, args), this.getSkipExpr(rule.skip))
+      let cx = new LexicalContext(this, name, paramsFor(rule.params, args), this.getSkipExpr(rule.skip), rule.superGrammar)
       let start = found = rule.instances[instanceKey] = cx.node()
       let end = cx.node("end")
       generateExpr(start, end, rule.expr, cx)
@@ -195,6 +196,26 @@ class Graph {
   }
 }
 
+function gatherRules(grammar, ruleInfo) {
+  let explicitFirst = null
+  for (let name in grammar.rules) {
+    let ast = grammar.rules[name]
+    if (ast.first) {
+      if (explicitFirst) throw new Error("Multiple first rules")
+      explicitFirst = name
+    }
+    if (ruleInfo.rules[name]) continue
+    ruleInfo.rules[name] = new Rule(name, ast, grammar.super)
+  }
+  if (grammar.super) gatherRules(grammar.super, ruleInfo)
+  if (explicitFirst) ruleInfo.first = explicitFirst
+  for (let name in grammar.rules) {
+    if (ruleInfo.first == null) ruleInfo.first = name
+    if (grammar.rules[name].isToken && ruleInfo.tokens.indexOf(name) == -1) ruleInfo.tokens.push(name)
+  }
+}
+
+
 class Edge {
   constructor(to, match, effects) {
     this.to = to
@@ -282,6 +303,7 @@ function compileSingleExpr(expr, cx) {
   return start
 }
 
+// FIXME inline nested choice expressions?
 function generateExpr(start, end, expr, cx) {
   let t = expr.type, graph = cx.graph
   if (t == "CharacterRange") {
@@ -347,6 +369,14 @@ function generateExpr(start, end, expr, cx) {
   } else if (t == "ChoiceMatch") {
     for (let i = 0; i < expr.exprs.length; i++)
       generateExpr(start, end, expr.exprs[i], cx)
+  } else if (t == "SuperMatch") {
+    for (let grammar = cx.superGrammar; grammar; grammar = grammar.super) {
+      let rule = grammar.rules[cx.name]
+      if (!rule) continue
+      generateExpr(start, end, rule.expr, cx.superCx(grammar))
+      return
+    }
+    throw new SyntaxError("Invalid use of `super`")
   } else {
     throw new Error("Unrecognized AST node type " + t)
   }

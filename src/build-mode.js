@@ -1,3 +1,8 @@
+const parse = require("./parse")
+const compile = require("./compile")
+const {buildGraph} = require("./graph")
+const path = require("path"), fs = require("fs")
+
 let input = null, outputGraph = false, simplify = true, names = false, token = true, esModule = false, output = null
 
 for (let i = 2; i < process.argv.length; i++) {
@@ -19,24 +24,33 @@ function usage(code) {
 }
 
 if (input) {
-  out(run(require("fs").readFileSync(input, "utf8")))
+  out(run(parseWithSuper(path.dirname(input), fs.readFileSync(input, "utf8"))))
 } else {
   let buffer = ""
   process.stdin.resume()
   process.stdin.on("data", chunk => buffer += chunk.toString("utf8"))
-  process.stdin.on("end", () => out(run(buffer)))
+  process.stdin.on("end", () => out(run(parseWithSuper(process.cwd(), buffer))))
 }
 
-function run(input) {
-  let ast = require("./parse")(input)
-  let graph = require("./graph").buildGraph(ast, {token, simplify})
+
+function parseWithSuper(base, input) {
+  let ast = parse(input)
+  if (ast.extends) {
+    let file = path.resolve(base, ast.extends)
+    ast.super = parseWithSuper(path.dirname(file), fs.readFileSync(file, "utf8"))
+  }
+  return ast
+}
+
+function run(ast) {
+  let graph = buildGraph(ast, {token, simplify})
   if (outputGraph)
     return graph.toString()
   else
-    return require("./compile")(graph, {esModule, names})
+    return compile(graph, {esModule, names})
 }
 
 function out(string) {
-  if (output) require("fs").writeFileSync(output, string, "utf8")
+  if (output) fs.writeFileSync(output, string, "utf8")
   else process.stdout.write(string, "utf8")
 }

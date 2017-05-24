@@ -64,12 +64,7 @@ function generateCode(effects, to, nodeName) {
   return `[${codes.join(", ")}]`
 }
 
-function addToName(prefix, name) {
-  if (typeof name == "number") return JSON.stringify(prefix + name)
-  else return '"' + prefix + name.slice(1)
-}
-
-function compileEdge(edge, edgeInfo, nodeName) {
+function compileEdge(edgeInfo) {
   let match, code
   if (edgeInfo.useExpr != -1)
     match = `e[${edgeInfo.useExpr}]`
@@ -103,7 +98,7 @@ module.exports = function(graph, options = {}) {
   if (codeVector.length) code += `var c = [${codeVector.join(", ")}]\n`
   let nodes = [], edgeIndex = 0
   for (let name in graph.nodes) {
-    let content = `[${graph.nodes[name].map(edge => compileEdge(edge, edgeInfo[edgeIndex++], nodeName)).join(",\n   ")}]`
+    let content = `[${graph.nodes[name].map(_ => compileEdge(edgeInfo[edgeIndex++])).join(",\n   ")}]`
     if (options.names) nodes.push(`${name}: ${content}`)
     else nodes.push(content)
   }

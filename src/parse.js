@@ -10,7 +10,7 @@ function parseGrammar(p, node) {
   for (;;) {
     if (p.eat(tt._extends)) {
       if (node.extends) p.raise("Can't extend multiple grammars")
-      p.expect(tt.string)
+      if (p.type != tt.string) p.unexpected()
       node.extends = p.value
       p.next()
     } else if (p.eatContextual("include")) {
@@ -49,6 +49,8 @@ function parseRule(p, rules, isToken, skip) {
   // FIXME Storing the same sub-ast in multiple nodes is a rather
   // weird way to build an AST
   node.skip = skip
+  node.context = p.eatContextual("context")
+  node.start = p.eatContextual("start")
   node.id = p.parseIdent(true)
   node.params = []
   if (p.eat(tt.parenL)) while (!p.eat(tt.parenR)) {
@@ -60,11 +62,10 @@ function parseRule(p, rules, isToken, skip) {
   if (node.id.name in rules)
     p.raise(node.id.start, `Duplicate rule declaration '${node.id.name}'`)
   rules[node.id.name] = node
-  node.context = p.eat(tt.star)
-  node.tokenType = null
   p.expect(tt.braceL)
   node.expr = parseExprChoice(p)
   p.expect(tt.braceR)
+  node.tokenType = null
   if (!node.context && p.eat(tt.eq)) {
     if (p.type != tt.string) p.unexpected()
     node.tokenType = p.value
