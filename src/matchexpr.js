@@ -8,7 +8,8 @@ function escRe(str) {
 
 const OP_SEQ = 0, OP_CHOICE = 1,
       OP_STAR = 2, OP_PLUS = 3, OP_MAYBE = 4,
-      OP_LOOKAHEAD = 5, OP_NEG_LOOKAHEAD = 6
+      OP_LOOKAHEAD = 5, OP_NEG_LOOKAHEAD = 6,
+      OP_PREDICATE = 7
 
 class MatchExpr {
   constructor() {}
@@ -225,6 +226,26 @@ class LookaheadMatch extends MatchExpr {
   forEach(f) { f(this); if (this.expr) this.expr.forEach(f) }
 }
 exports.LookaheadMatch = LookaheadMatch
+
+class PredicateMatch extends MatchExpr {
+  constructor(name) {
+    super()
+    this.name = name
+  }
+
+  get isNull() { return true }
+
+  get simple() { return false }
+
+  eq(other) { return other instanceof PredicateMatch && other.name == this.name }
+
+  toRegexp() { return "PRED(" + this.name + ")" }
+
+  toExpr() {
+    return `[${OP_PREDICATE}, ${JSON.stringify(this.name)}]`
+  }
+}
+exports.PredicateMatch = PredicateMatch
 
 let eqArray = exports.eqArray = function(a, b) {
   if (a.length != b.length) return false

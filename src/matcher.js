@@ -15,16 +15,15 @@ class Context {
 const MAX_LOOKAHEAD_LINES = 2
 
 class Stream {
-  constructor() {
+  constructor(mode) {
+    this.mode = mode
     this.stream = null
-    this.graph = null
     this.line = 0
     this.string = ""
   }
 
-  init(stream, graph) {
+  init(stream) {
     this.stream = stream
-    this.graph = graph
     this.line = 0
     this.string = stream ? stream.string.slice(stream.start) : "\n"
     return this
@@ -33,14 +32,14 @@ class Stream {
   ahead(n) {
     for (;;) {
       if (n <= this.string.length) return true
-      if (this.string.charAt(this.string.length - 1) !== 10) {
+      if (this.string.charCodeAt(this.string.length - 1) !== 10) {
         this.string += "\n"
       } else if (this.line === MAX_LOOKAHEAD_LINES || !this.stream || !this.stream.lookAhead) {
         return false
       } else {
         let next = this.stream.lookAhead(this.line + 1)
         if (next == null) return false
-        this.string += next
+        this.string += next + "\n"
         this.line++
       }
     }
@@ -97,6 +96,8 @@ function matchExpr(expr, stream, pos) {
     return lookahead(stream, pos, expr[1]) ? pos : -1
   } else if (op === 6) { // OP_NEG_LOOKAHEAD, expr
     return lookahead(stream, pos, expr[1]) ? -1 : pos
+  } else if (op === 7) { // OP_PREDICATE, name
+    return stream.mode.options.predicates[expr[1]](stream.string, pos) ? pos : -1
   } else {
     throw new Error("Unknown match type " + expr)
   }
@@ -140,7 +141,7 @@ class State {
     let context = this.context, nodePos = this.stack.length - 1
     // Machine finished. Can only happen during lookahead, since the main graph is cyclic.
     if (nodePos === -1) return 0
-    let nodeName = this.stack[nodePos], node = stream.graph.nodes[nodeName]
+    let nodeName = this.stack[nodePos], node = stream.mode.graph.nodes[nodeName]
     for (let i = 0, last = node.length - 2;;) {
       let match = matchEdge(node, stream, i)
       let taken = charsTaken, curSkip = match == last ? maxSkip : 0
@@ -187,7 +188,7 @@ class State {
   forward(stream) {
     let progress = this.runMaybe(stream, 2)
     if (progress < 0) {
-      this.stack.push(stream.graph.token)
+      this.stack.push(stream.mode.graph.token)
       progress = this.runMaybe(stream, 0)
     }
     return progress
@@ -204,12 +205,12 @@ class State {
   }
 }
 
-// Reused stream instance for regular, non-lookahead matching
-const streamObj = new Stream
-
+// declare global: CodeMirror
 ;(typeof exports === "object" ? exports : CodeMirror).GrammarMode = class GrammarMode {
-  constructor(graph) {
+  constructor(graph, options) {
     this.graph = graph
+    this.options = options || {}
+    this.stream = new Stream(this)
   }
 
   startState() { return new State([this.graph.start], null) }
@@ -217,16 +218,16 @@ const streamObj = new Stream
   copyState(state) { return new State(state.stack.slice(), state.context) }
 
   token(stream, state) {
-    stream.pos += state.forward(streamObj.init(stream, this.graph))
+    stream.pos += state.forward(this.stream.init(stream, this.graph))
     let tokenType = tokenValue
     for (let cx = state.context; cx; cx = cx.parent)
       if (cx.tokenType) tokenType = cx.tokenType + (tokenType ? " " + tokenType : "")
     if (stream.eol())
-      state.forward(streamObj.init(null, this.graph))
+      state.forward(this.stream.init(null, this.graph))
     return tokenType
   }
 
   blankLine(state) {
-    state.forward(streamObj.init(null, this.graph))
+    state.forward(this.stream.init(null, this.graph))
   }
 }

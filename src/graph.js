@@ -1,5 +1,5 @@
 const {nullMatch, anyMatch, dotMatch, StringMatch, RangeMatch, SeqMatch,
-       ChoiceMatch, RepeatMatch, LookaheadMatch, eqArray} = require("./matchexpr")
+       ChoiceMatch, RepeatMatch, LookaheadMatch, PredicateMatch, eqArray} = require("./matchexpr")
 
 const none = [], noParams = Object.create(null)
 
@@ -377,6 +377,8 @@ function generateExpr(start, end, expr, cx) {
       return
     }
     throw new SyntaxError("Invalid use of `super`")
+  } else if (t == "PredicateMatch") {
+    graph.edge(start, end, new PredicateMatch(expr.id.name))
   } else {
     throw new Error("Unrecognized AST node type " + t)
   }

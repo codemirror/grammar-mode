@@ -5,6 +5,7 @@ const path = require("path"), fs = require("fs")
 
 let input = null, outputGraph = false, simplify = true, names = false, token = true, esModule = false, output = null
 
+// declare global: process
 for (let i = 2; i < process.argv.length; i++) {
   let arg = process.argv[i]
   if (arg == "--graph") outputGraph = true
@@ -19,7 +20,9 @@ for (let i = 2; i < process.argv.length; i++) {
 }
 
 function usage(code) {
-  console.log("build-mode [file] [--output file] [--es-module] [--no-token] [--graph] [--no-simplify] [--names]")
+  ;(code ? process.stderr : process.stdout).write(
+    "build-mode [file] [--output file] [--es-module] [--no-token] [--graph] [--no-simplify] [--names]\n"
+  )
   process.exit(code)
 }
 

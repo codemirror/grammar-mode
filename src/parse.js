@@ -98,6 +98,11 @@ function parseExprInner(p) {
     let node = p.startNode()
     p.next()
     return p.finishNode(node, "SuperMatch")
+  } else if (p.type == tt.bitwiseAND) {
+    let node = p.startNode()
+    p.next()
+    node.id = p.parseIdent(true)
+    return p.finishNode(node, "PredicateMatch")
   } else {
     let node = p.startNode()
     if (p.type == tt.name && p.value == "_") {
