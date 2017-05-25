@@ -54,10 +54,10 @@ function lookahead(mcx, pos, start) {
   let state = new State([start], null)
   for (;;) {
     // FIXME implement custom scanning algorithm?
-    let taken = state.runMaybe(mcx, 0, pos)
-    if (taken === -1) return false
+    let newPos = state.runMaybe(mcx, 0, pos)
+    if (newPos < 0) return false
     if (state.stack.length === 0) return true
-    pos += taken
+    pos = newPos
   }
 }
 
@@ -107,16 +107,6 @@ function matchExpr(expr, mcx, pos) {
   }
 }
 
-let charsTaken = 0
-
-function matchEdge(node, mcx, start) {
-  for (let i = start; i < node.length; i += 2) {
-    charsTaken = matchExpr(node[i], mcx, 0)
-    if (charsTaken > -1) return i
-  }
-  return -1
-}
-
 let tokenValue = null
 
 class State {
@@ -140,26 +130,25 @@ class State {
   // Returns the amount of characters consumed, or -1 if no match was
   // found. The amount will always be positive, unless the graph
   // returned out of its last node, in which case it may return 0.
-  runMaybe(mcx, maxSkip) {
+  runMaybe(mcx, maxSkip, pos) {
     // FIXME profile whether this hack is actually faster than keeping an array
     let context = this.context, nodePos = this.stack.length - 1
     // Machine finished. Can only happen during lookahead, since the main graph is cyclic.
     if (nodePos === -1) return 0
     let nodeName = this.stack[nodePos], node = mcx.nodes[nodeName]
-    for (let i = 0, last = node.length - 2;;) {
-      let match = matchEdge(node, mcx, i)
-      let taken = charsTaken, curSkip = match == last ? maxSkip : 0
-      if (match === -1) {
+    for (let i = 0, last = node.length - 2;; i += 2) {
+      let newPos = matchExpr(node[i], mcx, pos)
+      if (newPos < 0) {
+        if (i < last) continue
         if (maxSkip === 0) return -1
-        curSkip = maxSkip - 1
-        match = last
-        taken = 0
+        newPos = pos
+        maxSkip--
       }
 
-      tokenValue = this.apply(node[match + 1], mcx)
-      if (taken > 0) return taken
+      tokenValue = this.apply(node[i + 1], mcx)
+      if (newPos > pos) return newPos
 
-      let inner = this.runMaybe(mcx, curSkip)
+      let inner = this.runMaybe(mcx, i === last ? maxSkip : 0, pos)
       if (inner > -1) return inner
 
       // Reset to state we started with
@@ -168,7 +157,7 @@ class State {
       this.stack[nodePos] = nodeName
 
       // Continue trying to match further edges in this node, if any
-      if ((i = match + 2) > last) return -1
+      if (i === last) return -1
     }
   }
 
@@ -190,10 +179,10 @@ class State {
   }
 
   forward(mcx) {
-    let progress = this.runMaybe(mcx, 2)
+    let progress = this.runMaybe(mcx, 2, 0)
     if (progress < 0) {
       this.stack.push(mcx.graph.token)
-      progress = this.runMaybe(mcx, 0)
+      progress = this.runMaybe(mcx, 0, 0)
     }
     return progress
   }
@@ -210,7 +199,7 @@ class State {
 }
 
 // declare global: CodeMirror
-;(typeof exports === "object" ? exports : CodeMirror).GrammarMode = class GrammarMode {
+CodeMirror.GrammarMode = class GrammarMode {
   constructor(graph, options) {
     this.graph = graph
     this.options = options || {}
