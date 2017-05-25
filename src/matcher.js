@@ -14,16 +14,20 @@ class Context {
 
 const MAX_LOOKAHEAD_LINES = 2
 
-class Stream {
-  constructor(mode) {
-    this.mode = mode
+class MatchContext {
+  constructor(graph, options) {
+    this.graph = graph
+    this.nodes = graph.nodes
+    this.options = options
     this.stream = null
+    this.state = null
     this.line = 0
     this.string = ""
   }
 
-  init(stream) {
+  start(stream, state) {
     this.stream = stream
+    this.state = state
     this.line = 0
     this.string = stream ? stream.string.slice(stream.start) : "\n"
     return this
@@ -46,26 +50,26 @@ class Stream {
   }
 }
 
-function lookahead(stream, pos, start) {
+function lookahead(mcx, pos, start) {
   let state = new State([start], null)
   for (;;) {
     // FIXME implement custom scanning algorithm?
-    let taken = state.runMaybe(stream, 0, pos)
+    let taken = state.runMaybe(mcx, 0, pos)
     if (taken === -1) return false
     if (state.stack.length === 0) return true
     pos += taken
   }
 }
 
-function matchExpr(expr, stream, pos) {
+function matchExpr(expr, mcx, pos) {
   if (expr === null) return pos
 
   if (typeof expr === "string") {
     let end = pos + expr.length
-    return stream.ahead(end) && stream.string.slice(pos, end) === expr ? end : -1
+    return mcx.ahead(end) && mcx.string.slice(pos, end) === expr ? end : -1
   }
   if (expr.exec) {
-    let m = expr.exec(stream.string.slice(pos))
+    let m = expr.exec(pos > 0 ? mcx.string.slice(pos) : mcx.string)
     if (!m) return -1
     return pos + m[0].length
   }
@@ -73,31 +77,31 @@ function matchExpr(expr, stream, pos) {
   let op = expr[0]
   if (op === 0) { // OP_SEQ, ...rest
     for (let i = 1; i < expr.length; i++) {
-      pos = matchExpr(expr[i], stream, pos)
+      pos = matchExpr(expr[i], mcx, pos)
       if (pos < 0) return -1
     }
     return pos
   } else if (op === 1) { // OP_CHOICE, ...rest
     for (let i = 1, e = expr.length - 1;; i++) {
-      let cur = matchExpr(expr[i], stream, pos)
+      let cur = matchExpr(expr[i], mcx, pos)
       if (i === e || cur > -1) return cur
     }
     return -1
   } else if (op === 2 || op === 3) { // OP_STAR/OP_PLUS, expr
-    if (op === 3 && (pos = matchExpr(expr[1], stream, pos)) < 0) return -1
+    if (op === 3 && (pos = matchExpr(expr[1], mcx, pos)) < 0) return -1
     for (;;) {
-      let inner = matchExpr(expr[1], stream, pos)
+      let inner = matchExpr(expr[1], mcx, pos)
       if (inner == -1) return pos
       pos = inner
     }
   } else if (op === 4) { // OP_MAYBE, expr
-    return Math.max(matchExpr(expr[1], stream, pos), pos)
+    return Math.max(matchExpr(expr[1], mcx, pos), pos)
   } else if (op === 5) { // OP_LOOKAHEAD, expr
-    return lookahead(stream, pos, expr[1]) ? pos : -1
+    return lookahead(mcx, pos, expr[1]) ? pos : -1
   } else if (op === 6) { // OP_NEG_LOOKAHEAD, expr
-    return lookahead(stream, pos, expr[1]) ? -1 : pos
+    return lookahead(mcx, pos, expr[1]) ? -1 : pos
   } else if (op === 7) { // OP_PREDICATE, name
-    return stream.mode.options.predicates[expr[1]](stream.string, pos) ? pos : -1
+    return mcx.options.predicates[expr[1]](mcx.string, pos, mcx.state.context) ? pos : -1
   } else {
     throw new Error("Unknown match type " + expr)
   }
@@ -105,9 +109,9 @@ function matchExpr(expr, stream, pos) {
 
 let charsTaken = 0
 
-function matchEdge(node, stream, start) {
+function matchEdge(node, mcx, start) {
   for (let i = start; i < node.length; i += 2) {
-    charsTaken = matchExpr(node[i], stream, 0)
+    charsTaken = matchExpr(node[i], mcx, 0)
     if (charsTaken > -1) return i
   }
   return -1
@@ -136,14 +140,14 @@ class State {
   // Returns the amount of characters consumed, or -1 if no match was
   // found. The amount will always be positive, unless the graph
   // returned out of its last node, in which case it may return 0.
-  runMaybe(stream, maxSkip) {
+  runMaybe(mcx, maxSkip) {
     // FIXME profile whether this hack is actually faster than keeping an array
     let context = this.context, nodePos = this.stack.length - 1
     // Machine finished. Can only happen during lookahead, since the main graph is cyclic.
     if (nodePos === -1) return 0
-    let nodeName = this.stack[nodePos], node = stream.mode.graph.nodes[nodeName]
+    let nodeName = this.stack[nodePos], node = mcx.nodes[nodeName]
     for (let i = 0, last = node.length - 2;;) {
-      let match = matchEdge(node, stream, i)
+      let match = matchEdge(node, mcx, i)
       let taken = charsTaken, curSkip = match == last ? maxSkip : 0
       if (match === -1) {
         if (maxSkip === 0) return -1
@@ -152,10 +156,10 @@ class State {
         taken = 0
       }
 
-      tokenValue = this.apply(node[match + 1], stream)
+      tokenValue = this.apply(node[match + 1], mcx)
       if (taken > 0) return taken
 
-      let inner = this.runMaybe(stream, curSkip)
+      let inner = this.runMaybe(mcx, curSkip)
       if (inner > -1) return inner
 
       // Reset to state we started with
@@ -168,16 +172,16 @@ class State {
     }
   }
 
-  apply(code, stream) {
+  apply(code, mcx) {
     this.pop()
     for (let i = 0; i < code.length;) {
       let op = code[i++]
       if (op === 0) // PUSH node
         this.stack[this.stack.length] = code[i++]
       else if (op === 1) // ADD_CONTEXT name
-        this.pushContext(code[i++], null, stream.stream)
+        this.pushContext(code[i++], null, mcx.stream)
       else if (op === 2) // ADD_TOKEN_CONTEXT name tokenType
-        this.pushContext(code[i++], code[i++], stream.stream)
+        this.pushContext(code[i++], code[i++], mcx.stream)
       else if (op === 3) // TOKEN tokenType
         return code[i++]
       else
@@ -185,11 +189,11 @@ class State {
     }
   }
 
-  forward(stream) {
-    let progress = this.runMaybe(stream, 2)
+  forward(mcx) {
+    let progress = this.runMaybe(mcx, 2)
     if (progress < 0) {
-      this.stack.push(stream.mode.graph.token)
-      progress = this.runMaybe(stream, 0)
+      this.stack.push(mcx.graph.token)
+      progress = this.runMaybe(mcx, 0)
     }
     return progress
   }
@@ -210,7 +214,7 @@ class State {
   constructor(graph, options) {
     this.graph = graph
     this.options = options || {}
-    this.stream = new Stream(this)
+    this.mcx = new MatchContext(graph, options)
   }
 
   startState() { return new State([this.graph.start], null) }
@@ -218,16 +222,16 @@ class State {
   copyState(state) { return new State(state.stack.slice(), state.context) }
 
   token(stream, state) {
-    stream.pos += state.forward(this.stream.init(stream, this.graph))
+    stream.pos += state.forward(this.mcx.start(stream, state))
     let tokenType = tokenValue
     for (let cx = state.context; cx; cx = cx.parent)
       if (cx.tokenType) tokenType = cx.tokenType + (tokenType ? " " + tokenType : "")
     if (stream.eol())
-      state.forward(this.stream.init(null, this.graph))
+      state.forward(this.mcx.start(null, state))
     return tokenType
   }
 
   blankLine(state) {
-    state.forward(this.stream.init(null, this.graph))
+    state.forward(this.mcx.start(null, state))
   }
 }
