@@ -69,7 +69,7 @@ function matchExpr(expr, mcx, pos) {
     return mcx.ahead(end) && mcx.string.slice(pos, end) === expr ? end : -1
   }
   if (expr.exec) {
-    let m = expr.exec(pos > 0 ? mcx.string.slice(pos) : mcx.string)
+    let m = mcx.ahead(pos + 1) && expr.exec(pos > 0 ? mcx.string.slice(pos) : mcx.string)
     if (!m) return -1
     return pos + m[0].length
   }

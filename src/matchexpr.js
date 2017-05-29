@@ -16,6 +16,7 @@ class MatchExpr {
 
   get isNull() { return false }
   get simple() { return true }
+  get isolated() { return false }
 
   toExpr() {
     let re = this.toRegexp()
@@ -33,6 +34,7 @@ class StringMatch extends MatchExpr {
   }
 
   get simple() { return this.string != "\n" }
+  get isolated() { return !this.simple }
 
   eq(other) { return other instanceof StringMatch && other.string == this.string }
 
@@ -50,6 +52,7 @@ class RangeMatch extends MatchExpr {
   }
 
   get simple() { return this.from > "\n" || this.to < "\n" }
+  get isolated() { return !this.simple }
 
   eq(other) { return other instanceof RangeMatch && other.from == this.from && other.to == this.to }
 
@@ -59,6 +62,7 @@ exports.RangeMatch = RangeMatch
 
 const anyMatch = exports.anyMatch = new class AnyMatch extends MatchExpr {
   get simple() { return false }
+  get isolated() { return true }
   eq(other) { return other == anyMatch }
   toRegexp() { return "[^]" }
 }
@@ -85,6 +89,9 @@ class SeqMatch extends MatchExpr {
 
   get simple() {
     return this.matches.every(m => m.simple)
+  }
+  get isolated() {
+    return this.matches.some(m => m.isolated)
   }
 
   toRegexp() { return this.matches.map(m => m.toRegexp()).join("") }
@@ -119,6 +126,10 @@ class SeqMatch extends MatchExpr {
     }
     let matches = before.concat(after)
     return matches.length == 1 ? matches[0] : new SeqMatch(matches)
+  }
+
+  static canCombine(left, right) {
+    return left.isolated ? right.isNull : right.isolated ? left.isNull : true
   }
 }
 exports.SeqMatch = SeqMatch

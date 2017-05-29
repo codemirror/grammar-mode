@@ -405,6 +405,7 @@ function simplifySequence(graph, node, edges) {
     if (next.length != 1) continue
     let second = next[0]
     if (second.to == first.to ||
+        !SeqMatch.canCombine(first.match, second.match) ||
         (!first.match.isNull && second.effects.some(e => e instanceof PushContext)) ||
         (!second.match.isNull && first.effects.indexOf(popContext) > -1))
       continue
@@ -428,17 +429,17 @@ function simplifyChoice(strict, _graph, _node, edges) {
   for (let from = 0; from < edges.length - 1; from++) {
     if (strict && from > 0) break
     let first = edges[from], to = from + 1
-    if (first.match.isNull) continue
+    if (first.match.isNull || first.match.isolated) continue
     for (; to < edges.length; to++) {
       let edge = edges[to]
-      if (edge.to != first.to || !sameEffect(first, edge) || edge.match.isNull)
+      if (edge.to != first.to || !sameEffect(first, edge) || edge.match.isNull || edge.match.isolated)
         break
     }
     if (strict && to < edges.length - 1) break
     let match = first.match
     for (let j = from + 1; j < to; j++) match = ChoiceMatch.create(match, edges[j].match)
     let next = to < edges.length && edges[to]
-    if (next && next.match.isNull && next.to == first.to && sameEffect(first, next)) {
+    if (next && !next.match.isolated && next.match.isNull && next.to == first.to && sameEffect(first, next)) {
       to++
       match = new RepeatMatch(match, "?")
     }
@@ -463,7 +464,7 @@ function simplifyChoiceLoose(graph, node, edges) {
 function simplifyRepeat(graph, node, edges) {
   if (node == graph.start || edges.length != 2) return false
   let first = edges[0]
-  if (first.to != node || first.effects.length > 0) return false
+  if (first.to != node || first.effects.length > 0 || first.match.isolated) return false
   let newNode = graph.node(node, "after")
   graph.nodes[newNode] = [edges[1]]
   graph.nodes[node] = [new Edge(newNode, new RepeatMatch(first.match, "*"))]
