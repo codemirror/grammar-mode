@@ -196,6 +196,19 @@ class State {
     while (this.context && this.stack.length < this.context.depth)
       this.context = this.context.parent
   }
+
+  atLabel(graph, name, inContext) {
+    let nodeName = graph.labels[name]
+    for (let i = this.stack.length - 1; i >= 0; i--) if (this.stack[i] === nodeName) {
+      if (inContext) for (let cx = this.context; cx; cx = cx.parent) {
+        if (cx.name === inContext) {
+          if (cx.depth < i) return true
+          else break
+        }
+      }
+    }
+    return false
+  }
 }
 
 // declare global: CodeMirror

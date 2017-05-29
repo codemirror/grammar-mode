@@ -60,11 +60,13 @@ class Graph {
     this.curName = null
     this.skipExprs = []
     this.rules = Object.create(null)
+    this.labeledNodes = Object.create(null)
     let ruleInfo = {rules: this.rules, first: null, tokens: []}
     gatherRules(grammar, ruleInfo)
 
     if (!ruleInfo.first) throw new SyntaxError("Empty grammar")
     this.start = this.buildStartNode(ruleInfo.first)
+    this.labeledNodes[this.start] = "!start"
     if (this.options.token !== false)
       this.token = this.buildTokenNode(ruleInfo.tokens)
   }
@@ -89,6 +91,9 @@ class Graph {
       let end = cx.node("end")
       generateExpr(start, end, rule.expr, cx)
       if (rule.context) {
+        // FIXME this will still create contexts when, for example,
+        // entering Expression from Statement, even when nothing is
+        // matched. Delay context pushing somehow?
         let edges = this.nodes[start], effect = new PushContext(name, rule.tokenType)
         for (let i = 0; i < edges.length; i++)
           edges[i].effects.unshift(effect)
@@ -358,7 +363,12 @@ function generateExpr(start, end, expr, cx) {
     graph.edge(start, end, new LookaheadMatch(before, expr.kind == "~"))
   } else if (t == "SequenceMatch") {
     for (let i = 0; i < expr.exprs.length; i++) {
-      let next = end, to = next, cur = expr.exprs[i]
+      let cur = expr.exprs[i]
+      if (cur.type == "Label" && i < expr.exprs.length - 1) {
+        graph.labeledNodes[start] = cur.id.name
+        continue
+      }
+      let next = end, to = next
       if (i < expr.exprs.length - 1) {
         next = cx.node()
         to = maybeSkipBefore(next, cx)
@@ -377,6 +387,8 @@ function generateExpr(start, end, expr, cx) {
       return
     }
     throw new SyntaxError("Invalid use of `super`")
+  } else if (t == "Label") {
+    throw new SyntaxError("Labels must appear before other expressions")
   } else if (t == "PredicateMatch") {
     graph.edge(start, end, new PredicateMatch(expr.id.name))
   } else {
@@ -400,7 +412,7 @@ function simplifySequence(graph, node, edges) {
   let changed = false
   outer: for (let i = 0; i < edges.length; i++) {
     let first = edges[i]
-    if (first.to == node || first.to == graph.start || !first.to) continue
+    if (first.to == node || (first.to in graph.labeledNodes) || !first.to) continue
     let next = graph.nodes[first.to]
     if (next.length != 1) continue
     let second = next[0]
@@ -581,6 +593,10 @@ function mergeDuplicates(graph) {
       for (let j = i + 1; j < names.length; j++) {
         let otherName = names[j]
         if (eqArray(edges, graph.nodes[otherName])) {
+          if (otherName in graph.labeledNodes) {
+            if (name in graph.labeledNodes) continue outer
+            let tmp = name; name = otherName; otherName = tmp
+          }
           graph.merge(name, otherName)
           continue outer
         }
@@ -591,6 +607,7 @@ function mergeDuplicates(graph) {
 }
 
 function checkForCycles(graph) {
+  return
   function addCalls(stack, edge) {
     let copy = null
     for (let i = 0; i < edge.effects.length; i++) {

@@ -86,11 +86,16 @@ module.exports = function(graph, options = {}) {
   })()
   let edgeInfo = buildEdgeInfo(graph, nodeName)
 
-  let exprVector = [], codeVector = []
+  let exprVector = [], codeVector = [], labels = []
   for (let i = 0; i < edgeInfo.length; i++) {
     let info = edgeInfo[i]
     if (info.useExpr > -1 && info.expr) exprVector[info.useExpr] = info.expr
     if (info.useCode > -1 && info.code) codeVector[info.useCode] = info.code
+
+  }
+  for (let name in graph.labeledNodes) {
+    let label = graph.labeledNodes[name]
+    if (label != "!start") labels.push(`${label}: ${nodeName(name)}`)
   }
 
   let code = "", exp = options.esModule ? "export var " : "exports."
@@ -105,6 +110,7 @@ module.exports = function(graph, options = {}) {
   code += `${exp}nodes = ${options.names ? "{" : "["}\n  ${nodes.join(",\n  ")}\n${options.names ? "}" : "]"}\n`
   code += `${exp}start = ${nodeName(graph.start)}\n`
   code += `${exp}token = ${nodeName(graph.token)}\n`
+  if (labels.length) code += `${exp}labels = {${labels.join(", ")}}\n`
 
   return code
 }
