@@ -451,25 +451,21 @@ function simplifyChoice(strict, _graph, _node, edges) {
   return changed
 }
 
-function simplifyChoiceStrict(graph, node, edges) {
-  return simplifyChoice(true, graph, node, edges)
-}
-function simplifyChoiceLoose(graph, node, edges) {
-  return simplifyChoice(false, graph, node, edges)
-}
+let simplifyChoiceStrict = simplifyChoice.bind(null, true),
+    simplifyChoiceLoose = simplifyChoice.bind(null, false)
 
-// FIXME bring back agressive repeat simplification as a second-tier
-// simplifier, to fix things like comments being consumed one char at
-// a time
-function simplifyRepeat(graph, node, edges) {
-  if (node == graph.start || edges.length != 2) return false
+function simplifyRepeat(strict, graph, node, edges) {
+  if (node == graph.start || (strict && edges.length != 2)) return false
   let first = edges[0]
   if (first.to != node || first.effects.length > 0 || first.match.isolated) return false
   let newNode = graph.node(node, "after")
-  graph.nodes[newNode] = [edges[1]]
+  graph.nodes[newNode] = edges.slice(1)
   graph.nodes[node] = [new Edge(newNode, new RepeatMatch(first.match, "*"))]
   return true
 }
+
+let simplifyRepeatStrict = simplifyRepeat.bind(null, true),
+    simplifyRepeatLoose = simplifyRepeat.bind(null, false)
 
 function simplifyLookahead(graph, _node, edges) {
   let changed = false
@@ -566,12 +562,13 @@ function simplifyWith(graph, simplifier) {
 function simplify(graph) {
   for (;;) {
     while (simplifyWith(graph, simplifyChoiceStrict) |
-           simplifyWith(graph, simplifyRepeat) |
+           simplifyWith(graph, simplifyRepeatStrict) |
            simplifyWith(graph, simplifyLookahead) |
            simplifyWith(graph, simplifySequence)) {}
     graph.gc()
     mergeDuplicates(graph)
     if (!(simplifyWith(graph, simplifyChoiceLoose) |
+          simplifyWith(graph, simplifyRepeatLoose) |
           simplifyWith(graph, simplifyCall))) break
   }
 }
