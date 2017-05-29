@@ -6,6 +6,11 @@ function escRe(str) {
   })
 }
 
+function toSubRegexp(expr, wrapExpr) {
+  if (expr.regexpPrec <= wrapExpr.regexpPrec) return `(?:${expr.toRegexp()})`
+  else return expr.toRegexp()
+}
+
 const OP_SEQ = 0, OP_CHOICE = 1,
       OP_STAR = 2, OP_PLUS = 3, OP_MAYBE = 4,
       OP_LOOKAHEAD = 5, OP_NEG_LOOKAHEAD = 6,
@@ -18,10 +23,10 @@ class MatchExpr {
   get simple() { return true }
   get isolated() { return false }
 
+  get regexpPrec() { return 4 }
+
   toExpr() {
-    let re = this.toRegexp()
-    if (this instanceof SeqMatch) re = `(?:${re})`
-    return `/^${re}/`
+    return `/^${toSubRegexp(this, SeqMatch.prototype)}/`
   }
 
   forEach(f) { f(this) }
@@ -94,7 +99,9 @@ class SeqMatch extends MatchExpr {
     return this.matches.some(m => m.isolated)
   }
 
-  toRegexp() { return this.matches.map(m => m.toRegexp()).join("") }
+  get regexpPrec() { return 2 }
+
+  toRegexp() { return this.matches.map(m => toSubRegexp(m, this)).join("") }
 
   toExpr(nodeName) {
     if (this.simple) return super.toExpr()
@@ -144,6 +151,9 @@ class ChoiceMatch extends MatchExpr {
 
   eq(other) { return other instanceof ChoiceMatch && eqArray(other.matches, this.matches) }
 
+  get regexpPrec() { return 1 }
+
+  // FIXME reduce to \d, \w when appropriate
   toRegexp() {
     let set = ""
     for (let i = 0; i < this.matches.length; i++) {
@@ -158,7 +168,7 @@ class ChoiceMatch extends MatchExpr {
       }
     }
     if (set != null) return "[" + set + "]"
-    return "(?:" + this.matches.map(m => m.toRegexp()).join("|") + ")"
+    return this.matches.map(m => toSubRegexp(m, this)).join("|")
   }
 
   toExpr(nodeName) {
@@ -190,9 +200,10 @@ class RepeatMatch extends MatchExpr {
 
   eq(other) { return other instanceof RepeatMatch && this.match.eq(other.match) && this.type == other.type }
 
+  get regexpPrec() { return 3 }
+
   toRegexp() {
-    if (this.match instanceof SeqMatch) return "(?:" + this.match.toRegexp() + ")" + this.type
-    else return this.match.toRegexp() + this.type
+    return toSubRegexp(this.match, this) + this.type
   }
 
   toExpr(nodeName) {
