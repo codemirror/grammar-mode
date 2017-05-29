@@ -336,7 +336,7 @@ function generateExpr(start, end, expr, cx) {
     graph.edge(start, end, dotMatch)
   } else if (t == "RuleIdentifier") {
     cx.call(start, end, expr.id.name, expr.arguments.map(arg => compileSingleExpr(arg, cx)))
-  } else if (t == "RepeatedMatch") {
+  } else if (t == "RepeatedMatch") { // FIXME make sure whitespace is skipped only between matches
     if (expr.kind == "*") {
       let mid = cx.node("rep")
       graph.edge(start, mid)

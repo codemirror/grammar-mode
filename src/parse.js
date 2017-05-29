@@ -79,8 +79,10 @@ function parseExprInner(p) {
     let expr = parseExprChoice(p)
     p.expect(tt.parenR)
     return expr
-  } else if (p.type == tt.string) {
-    let node = p.startNode(), value = p.value
+  }
+  let node = p.startNode()
+  if (p.type == tt.string) {
+    let value = p.value
     p.next()
     if (p.type == tt.plusMin && p.value == "-" && value.length == 1) {
       p.next()
@@ -95,23 +97,19 @@ function parseExprInner(p) {
       return p.finishNode(node, "StringMatch")
     }
   } else if (p.type == tt._super) {
-    let node = p.startNode()
     p.next()
     return p.finishNode(node, "SuperMatch")
   } else if (p.type == tt.bitwiseAND) {
-    let node = p.startNode()
     p.next()
     node.id = p.parseIdent(true)
     return p.finishNode(node, "PredicateMatch")
+  } else if (p.type == tt.name && p.value == "_") {
+    p.next()
+    return p.finishNode(node, "AnyMatch")
+  } else if (p.type == tt.dot) {
+    p.next()
+    return p.finishNode(node, "DotMatch")
   } else {
-    let node = p.startNode()
-    if (p.type == tt.name && p.value == "_") {
-      p.next()
-      return p.finishNode(node, "AnyMatch")
-    } else if (p.type == tt.dot) {
-      p.next()
-      return p.finishNode(node, "DotMatch")
-    }
     node.id = p.parseIdent(true)
     node.arguments = []
     if (p.start == p.lastTokEnd && p.eat(tt.parenL)) while (!p.eat(tt.parenR)) {
