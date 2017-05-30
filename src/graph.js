@@ -205,7 +205,7 @@ function gatherRules(grammar, ruleInfo) {
   let explicitFirst = null
   for (let name in grammar.rules) {
     let ast = grammar.rules[name]
-    if (ast.first) {
+    if (ast.start) {
       if (explicitFirst) throw new Error("Multiple first rules")
       explicitFirst = name
     }
