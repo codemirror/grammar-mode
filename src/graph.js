@@ -308,6 +308,8 @@ function compileSingleExpr(expr, cx) {
   return start
 }
 
+const noSkipAfter = ["LookaheadMatch", "PredicateMatch", "Label", "RepeatMatch"]
+
 // FIXME inline nested choice expressions?
 function generateExpr(start, end, expr, cx) {
   let t = expr.type, graph = cx.graph
@@ -353,7 +355,7 @@ function generateExpr(start, end, expr, cx) {
       generateExpr(mid, midBefore, expr.expr, cx)
       graph.edge(mid, end)
     } else if (expr.kind == "?") {
-      generateExpr(start, end, expr.expr, cx)
+      generateExpr(start, maybeSkipBefore(end, cx), expr.expr, cx)
       graph.edge(start, end)
     }
   } else if (t == "LookaheadMatch") {
@@ -371,7 +373,7 @@ function generateExpr(start, end, expr, cx) {
       let next = end, to = next
       if (i < expr.exprs.length - 1) {
         next = cx.node()
-        to = maybeSkipBefore(next, cx)
+        to = noSkipAfter.indexOf(cur.type) > -1 ? next : maybeSkipBefore(next, cx)
       }
       generateExpr(start, to, cur, cx)
       start = next
