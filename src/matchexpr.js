@@ -216,10 +216,10 @@ class RepeatMatch extends MatchExpr {
 exports.RepeatMatch = RepeatMatch
 
 class LookaheadMatch extends MatchExpr {
-  constructor(start, positive) {
+  constructor(start, expr, positive) {
     super()
     this.start = start
-    this.expr = null
+    this.expr = expr
     this.positive = positive
   }
 
