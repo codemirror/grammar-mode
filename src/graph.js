@@ -6,6 +6,7 @@ exports.buildGraph = function(grammar, options) {
   let graph = new Graph(rules)
   graph.buildStartNode(start)
   if (options.tokens !== false) graph.buildTokenNode(tokens)
+  graph.mergeNullEdges()
   return graph
 }
 
@@ -247,6 +248,49 @@ class Graph {
     // FIXME
   }
 
+  findReferences(name, f) {
+    if (this.start == name) f(this, "start")
+    if (this.token == name) f(this, "token")
+    for (let node in this.nodes) {
+      let edges = this.nodes[node]
+      for (let i = 0; i < edges.length; i++) {
+        let edge = edges[i]
+        if (edge.to == name) f(edge, "to")
+        if (edge.call == name) f(edge, "call")
+        edge.match.forEach(expr => {
+          if (expr instanceof LookaheadMatch && expr.start === name) f(expr, "start")
+        })
+      }
+    }
+  }
+
+  countReferences(name) {
+    let count = 0
+    this.findReferences(name, () => count++)
+    return count
+  }
+
+  merge(a, b) {
+    delete this.nodes[b]
+    this.findReferences(b, (obj, prop) => obj[prop] = a)
+  }
+
+  mergeNullEdges() {
+    for (;;) {
+      let changed = false
+      for (let name in this.nodes) {
+        let edges = this.nodes[name], edge = edges[edges.length - 1]
+        if (edge.match == nullMatch && !edge.call && edge.to &&
+            (edges.length == 1 || this.countReferences(edge.to) == 1)) {
+          this.nodes[name] = edges.slice(0, edges.length - 1).concat(this.nodes[edge.to])
+          this.merge(name, edge.to)
+          changed = true
+        }
+      }
+      if (!changed) break
+    }
+  }
+
   toString() {
     let output = "digraph {\n"
     for (let node in this.nodes) {
@@ -267,7 +311,7 @@ function evalRuleExpr(graph, expr, start) {
 function evalSimpleExpr(graph, expr) {
   return expr.simpleValue || (expr.simpleValue = evalSimpleExprInner(graph, expr))
 }
-  
+
 function evalSimpleExprInner(graph, expr) {
   let t = expr.type
   if (t == "CharacterRange") {
@@ -315,12 +359,10 @@ function evalExpr(graph, expr, start, end) {
     graph.edge(start, end, nullMatch, rule.startNode(graph, expr.args))
   } else if (expr.type == "RepeatedMatch") {
     if (expr.kind == "*") {
-      if (graph.nodes[start].length) {
-        let copy = graph.newNode("DUP")
-        graph.edge(start, copy, nullMatch)
-        start = copy
-      }
-      evalExpr(graph, expr.expr, start, start)
+      let copy = graph.newNode("DUP")
+      graph.edge(start, copy, nullMatch)
+      evalExpr(graph, expr.expr, copy, copy)
+      graph.edge(copy, end, nullMatch) // FIXME this is not good
     } else if (expr.kind == "+") {
       let next = graph.newNode("NEXT")
       evalExpr(graph, expr.expr, start, next)
@@ -330,32 +372,32 @@ function evalExpr(graph, expr, start, end) {
       graph.edge(start, end, nullMatch)
     }
   } else if (expr.type == "SequenceMatch") {
-    let match = null, call = null
     for (let i = 0; i < expr.exprs.length; i++) {
-      let next = expr.exprs[i], simple = !call && evalSimpleExpr(graph, next)
-      if (simple && (!match || SeqMatch.canCombine(match, simple))) {
-        match = match ? SeqMatch.create(match, simple) : match
-      } else if (match && !match.isolated && next.type == "CallExpression" &&
-                 (match.isNull || !graph.rules[next.id.name].context)) {
-        call = graph.rules[next.id.name].startNode(graph, next.args)
-      } else {
-        if (match) {
-          let newStart = graph.newNode("UGH")
-          graph.edge(start, newStart, match, call)
-          match = call = null
-          start = newStart
+      let cur = expr.exprs[i], simple = evalSimpleExpr(graph, cur), call
+      if (simple) while (!simple.isolated && i < expr.exprs.length - 1) {
+        let next = expr.exprs[i + 1], nextSimple = evalSimpleExpr(graph, next)
+        if (nextSimple && SeqMatch.canCombine(simple, nextSimple)) {
+          simple = SeqMatch.create(simple, nextSimple)
+          i++
+        } else if (next.type == "CallExpression" &&
+                   (simple.isNull || !graph.rules[next.id.name].context)) {
+          call = graph.rules[next.id.name].startNode(graph, next.args)
+          i++
+          break
+        } else {
+          break
         }
-        let after = i == expr.exprs.length - 1 ? end : graph.newNode("OW")
-        evalExpr(graph, next, start, after)
-        start = after
       }
+      let after = i == expr.exprs.length - 1 ? end : graph.newNode("UGH")
+      if (simple) graph.edge(start, after, simple, call)
+      else evalExpr(graph, cur, start, after)
+      start = after
     }
-    if (match) graph.edge(start, end, match, call)
   } else if (expr.type == "ChoiceMatch") {
     for (let i = 0; i < expr.exprs.length; i++) {
       let simple = evalSimpleExpr(graph, expr.exprs[i]), next
-      if (simple && !simple.isolated) {
-        while (i < expr.exprs.length - 1 &&
+      if (simple) {
+        while (!simple.isolated && i < expr.exprs.length - 1 &&
                (next = evalSimpleExpr(graph, expr.exprs[i + 1])) &&
                !next.isolated) {
           simple = ChoiceMatch.create(simple, next)
