@@ -9,7 +9,7 @@ exports.buildGraph = function(grammar, _options) {
   // FIXME guard against infinite loops
   startGraph.edge(0, 0, nullMatch, new Call(cx.getRuleGraph(start, [])))
 
-  return cx.graphs //gcGraphs(cx.graphs, ".start")
+  return gcGraphs(cx.graphs, "_start")
 }
 
 class Call {
@@ -56,8 +56,8 @@ class Rule {
     }
     let graph = cx.registerGraph(this.name, new SubGraph(this.context))
     this.instances.push({args, graph})
-    let result = cx.evalExpr(instantiateArgs(this.params, args, this.expr), graph.node(), null)
-    graph.copy(0, null, result)
+    let result = cx.evalExpr(instantiateArgs(this.params, args, this.expr))
+    graph.nodes = result.nodes
     if (graph.recursive === null) graph.recursive = false
     return graph
   }
@@ -103,53 +103,37 @@ class SubGraph {
     }
   }
 
-  forEachRef(f) {
+  join(mayHaveOutgoing) {
+    let found = []
+    this.edges((e, n) => { if (e.to == null) found.push(n, e) })
+    if (found.length == 2) {
+      let edge = found[1], node = this.nodes[found[0]]
+      if (edge.match == nullMatch && !edge.effect && (mayHaveOutgoing || node.length == 1)) {
+        node.splice(node.indexOf(edge), 1)
+        return found[0]
+      }
+    }
+    let add = this.node()
+    for (let i = 1; i < found.length; i += 2) found[i].to = add
+    return add
+  }
+
+  edges(f) {
     for (let i = 0; i < this.nodes.length; i++) {
       let edges = this.nodes[i]
-      for (let j = 0; j < edges.length; j++) {
-        let edge = edges[j]
-        f(edge.to, edge, "to")
-        edge.match.forEach(expr => {
-          if (expr instanceof LookaheadMatch && expr.start != null)
-            f(edge.start, expr, "start")
-        })
-      }
+      for (let j = 0; j < edges.length; j++) f(edges[j], i)
     }
   }
 
   countReferences(node) {
     let count = 0
-    this.forEachRef(ref => { if (ref == node) count++ })
+    this.edges(e => { if (e.to == node) count++ })
     return count
-  }
-
-  merge(a, b) {
-    this.nodes.splice(b, 1)
-    if (a > b) a--
-    this.forEachRef((node, obj, prop) => {
-      if (node >= b) obj[prop] = node == b ? a : node - 1
-    })
-  }
-
-  mergeNullEdges() {
-    for (let node = 0; node < this.nodes.length; node++) {
-      let edges = this.nodes[node], edge = edges[edges.length - 1]
-      if (edge.match == nullMatch && !edge.call && edge.to != null &&
-          (edges.length == 1 || this.countReferences(edge.to) == 1)) {
-        this.nodes[node] = edges.slice(0, edges.length - 1).concat(this.nodes[edge.to])
-        this.merge(node, edge.to)
-        node = -1 // Restart loop
-      }
-    }
   }
 
   toString() {
     let output = ""
-    for (let node = 0; node < this.nodes.length; node++) {
-      let edges = this.nodes[node]
-      for (let i = 0; i < edges.length; i++)
-        output += "  " + edges[i].toString(this.name, node) + ";\n"
-    }
+    this.edges((e, n) => output += "  " + e.toString(this.name, n) + ";\n")
     return output
   }
 
@@ -159,17 +143,11 @@ class SubGraph {
   }
 
   singleEdgeTo(node) {
-    let edge = null
-    for (let i = 0; i < this.nodes.length; i++) {
-      let edges = this.nodes[i]
-      for (let j = 0; j < edges.length; j++) {
-        if (edges[j].to == node) {
-          if (edge == null) edge = edges[j]
-          else return null
-        }
-      }
-    }
-    return edge
+    let found = null
+    this.edges(e => {
+      if (e.to == node) found = found == null ? e : false
+    })
+    return found === false ? null : found
   }
 
   get simple() {
@@ -225,8 +203,10 @@ class Context {
     } else if (t == "DotMatch") {
       return SubGraph.dot
     } else if (t == "RuleIdentifier") {
-      let graph = this.getRuleGraph(expr.id.name, expr.arguments)
-      if (!graph.recursive && !graph.context && graph.edgeCount <= MAX_INLINE_EDGE_COUNT)
+      let graph = this.getRuleGraph(expr.id.name, expr.arguments), simple
+      if (graph.context && graph.context.token && (simple = graph.simple))
+        return SubGraph.simple(simple, new Token(graph.context.token))
+      else if (!graph.recursive && !graph.context && graph.edgeCount <= MAX_INLINE_EDGE_COUNT)
         return graph
       else
         return SubGraph.simple(nullMatch, new Call(graph))
@@ -263,7 +243,7 @@ class Context {
     } else if (kind == "+") {
       let next = graph.node()
       graph.copy(0, next, inner)
-      graph.copy(next, next, inner)
+      graph.copy(next, 0, inner)
       graph.edge(next, null, nullMatch)
     } else if (kind == "?") {
       graph.copy(0, null, inner)
@@ -273,40 +253,22 @@ class Context {
   }
 
   evalSequence(exprs) {
-    let graph = new SubGraph, node = 0, lastEdge = null
-    for (let i = 0, last = exprs.length - 1, next = null; i <= last; i++) {
-      let curGraph = next || this.evalExpr(exprs[i]), simple = curGraph.simple
-      next = null
-      if (simple) while (i < last) {
-        let nextExpr = this.evalExpr(exprs[i + 1], true)
-        let nextSimple = nextExpr.simple
-        if (nextSimple && SeqMatch.canCombine(simple, nextSimple)) {
-          simple = SeqMatch.create(simple, nextSimple)
-          i++
-        } else {
-          next = nextExpr
-          break
-        }
+    let graph = new SubGraph, edge = graph.edge(0, null, nullMatch)
+    for (let i = 0; i < exprs.length; i++) {
+      let next = this.evalExpr(exprs[i], edge && !edge.effect && !edge.match.isolated)
+      let firstEdge, copyFrom = 0
+      if (edge && !edge.effect &&
+          (firstEdge = next.singleEdgeFrom(0)) && !firstEdge.effect &&
+          SeqMatch.canCombine(edge.match, firstEdge.match)) {
+        edge.match = SeqMatch.create(edge.match, firstEdge.match)
+        copyFrom = firstEdge.to
       }
-      lastEdge = null
-      let end = i == last ? null : graph.node()
-      if (simple) {
-        if (lastEdge && !lastEdge.effect && SeqMatch.canCombine(lastEdge.match, simple))
-          lastEdge.match = SeqMatch.create(lastEdge.match, simple)
-        else
-          lastEdge = graph.edge(node, end, simple)
-      } else {
-        let firstEdge, copyFrom = 0
-        if (lastEdge && !lastEdge.effect &&
-            (firstEdge = curGraph.singleEdgeFrom(0)) && !firstEdge.effect &&
-            SeqMatch.canCombine(lastEdge.match, firstEdge.match)) {
-          lastEdge.match = SeqMatch.create(lastEdge.match, firstEdge.match)
-          copyFrom = firstEdge.to
-        }
-        graph.copy(node, end, curGraph, copyFrom)
-        lastEdge = graph.singleEdgeTo(end)
+      if (copyFrom != null) {
+        let hasIncoming = next.countReferences(copyFrom) == (copyFrom == 0 ? 0 : 1)
+        graph.copy(graph.join(hasIncoming), null, next, copyFrom)
+        if (i < exprs.length - 1)
+          edge = graph.singleEdgeTo(null)
       }
-      node = end
     }
     return graph
   }
@@ -360,4 +322,24 @@ function gatherRules(grammar) {
   }
   gather(grammar)
   return info
+}
+
+function gcGraphs(graphs, start) {
+  let work = [start], workIndex = 0
+  function add(name) {
+    if (work.indexOf(name) < 0) work.push(name)
+  }
+
+  while (workIndex < work.length) {
+    graphs[work[workIndex++]].edges(edge => {
+      if (edge.effect instanceof Call) add(edge.effect.target.name)
+      edge.match.forEach(m => {
+        if (m instanceof LookaheadMatch && m.start) add(m.start.name)
+      })
+    })
+  }
+
+  let result = Object.create(null)
+  work.forEach(name => result[name] = graphs[name])
+  return result
 }
