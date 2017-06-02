@@ -2,14 +2,23 @@ const {nullMatch, anyMatch, dotMatch, StringMatch, RangeMatch, SeqMatch,
        ChoiceMatch, RepeatMatch, LookaheadMatch, PredicateMatch} = require("./matchexpr")
 const {normalizeExpr, eqExprs, instantiateArgs} = require("./ast")
 
-exports.buildGraph = function(grammar, _options) {
-  let {rules, start/*, tokens*/} = gatherRules(grammar)
+exports.buildGraph = function(grammar, options) {
+  let {rules, start, tokens} = gatherRules(grammar)
   let cx = new Context(rules, Object.create(null))
   let startGraph = cx.registerGraph("_start", new SubGraph)
   // FIXME guard against infinite loops
-  startGraph.edge(0, 0, nullMatch, new Call(cx.getRuleGraph(start, [])))
+  startGraph.copy(0, 0, cx.evalCall(start, []))
+  let startGraphs = ["_start"]
 
-  return gcGraphs(cx.graphs, "_start")
+  if (options.tokens !== false) {
+    let tokenGraph = cx.registerGraph("_token", new SubGraph)
+    for (let i = 0; i < tokens.length; i++)
+      tokenGraph.copy(0, null, cx.evalCall(tokens[i], []))
+    tokenGraph.edge(0, null, anyMatch)
+    startGraphs.push("_token")
+  }
+
+  return gcGraphs(cx.graphs, startGraphs)
 }
 
 class Call {
@@ -203,13 +212,7 @@ class Context {
     } else if (t == "DotMatch") {
       return SubGraph.dot
     } else if (t == "RuleIdentifier") {
-      let graph = this.getRuleGraph(expr.id.name, expr.arguments), simple
-      if (graph.context && graph.context.token && (simple = graph.simple))
-        return SubGraph.simple(simple, new Token(graph.context.token))
-      else if (!graph.recursive && !graph.context && graph.edgeCount <= MAX_INLINE_EDGE_COUNT)
-        return graph
-      else
-        return SubGraph.simple(nullMatch, new Call(graph))
+      return this.evalCall(expr.id.name, expr.arguments)
     } else if (t == "RepeatedMatch") {
       return this.evalRepeat(expr.expr, expr.kind, continued)
     } else if (t == "SequenceMatch") {
@@ -230,6 +233,16 @@ class Context {
     } else {
       throw new Error("Unrecognized AST node type " + t)
     }
+  }
+
+  evalCall(name, args) {
+    let graph = this.getRuleGraph(name, args), simple
+    if (graph.context && graph.context.token && (simple = graph.simple))
+      return SubGraph.simple(simple, new Token(graph.context.token))
+    else if (!graph.recursive && !graph.context && graph.edgeCount <= MAX_INLINE_EDGE_COUNT)
+      return graph
+    else
+      return SubGraph.simple(nullMatch, new Call(graph))
   }
 
   evalRepeat(expr, kind, continued) {
@@ -324,8 +337,8 @@ function gatherRules(grammar) {
   return info
 }
 
-function gcGraphs(graphs, start) {
-  let work = [start], workIndex = 0
+function gcGraphs(graphs, startNames) {
+  let work = startNames.slice(), workIndex = 0
   function add(name) {
     if (work.indexOf(name) < 0) work.push(name)
   }
