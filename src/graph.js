@@ -25,10 +25,12 @@ class Call {
   constructor(target) { this.target = target }
   toString() { return `CALL(${this.target.name})` }
 }
+exports.Call = Call
 class Token {
   constructor(type) { this.type = type }
   toString() { return `TOKEN(${this.type})` }
 }
+exports.Token = Token
 
 class Edge {
   constructor(to, match, effect) {

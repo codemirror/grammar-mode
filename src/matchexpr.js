@@ -14,7 +14,9 @@ function toSubRegexp(expr, wrapExpr) {
 const OP_SEQ = 0, OP_CHOICE = 1,
       OP_STAR = 2, OP_PLUS = 3, OP_MAYBE = 4,
       OP_LOOKAHEAD = 5, OP_NEG_LOOKAHEAD = 6,
-      OP_PREDICATE = 7
+      OP_PREDICATE = 7, OP_CALL = 8, OP_TOKEN = 9
+exports.OP_CALL = OP_CALL
+exports.OP_TOKEN = OP_TOKEN
 
 class MatchExpr {
   constructor() {}
@@ -103,9 +105,9 @@ class SeqMatch extends MatchExpr {
 
   toRegexp() { return this.matches.map(m => toSubRegexp(m, this)).join("") }
 
-  toExpr(nodeName) {
+  toExpr(getName) {
     if (this.simple) return super.toExpr()
-    return `[${OP_SEQ}, ${this.matches.map(m => m.toExpr(nodeName)).join(", ")}]`
+    return `[${OP_SEQ}, ${this.matches.map(m => m.toExpr(getName)).join(", ")}]`
   }
 
   forEach(f) { f(this); this.matches.forEach(m => m.forEach(f)) }
@@ -173,9 +175,9 @@ class ChoiceMatch extends MatchExpr {
     return this.matches.map(m => toSubRegexp(m, this)).join("|")
   }
 
-  toExpr(nodeName) {
+  toExpr(getName) {
     if (this.simple) return super.toExpr()
-    return `[${OP_CHOICE}, ${this.matches.map(m => m.toExpr(nodeName)).join(", ")}]`
+    return `[${OP_CHOICE}, ${this.matches.map(m => m.toExpr(getName)).join(", ")}]`
   }
 
   forEach(f) { f(this); this.matches.forEach(m => m.forEach(f)) }
@@ -208,9 +210,9 @@ class RepeatMatch extends MatchExpr {
     return toSubRegexp(this.match, this) + this.type
   }
 
-  toExpr(nodeName) {
+  toExpr(getName) {
     if (this.simple) return super.toExpr()
-    return `[${this.type == "*" ? OP_STAR : this.type == "+" ? OP_PLUS : OP_MAYBE}, ${this.match.toExpr(nodeName)}]`
+    return `[${this.type == "*" ? OP_STAR : this.type == "+" ? OP_PLUS : OP_MAYBE}, ${this.match.toExpr(getName)}]`
   }
 
   forEach(f) { f(this); this.match.forEach(f) }
@@ -242,9 +244,9 @@ class LookaheadMatch extends MatchExpr {
       return "LOOKAHEAD(" + this.start + ")"
   }
 
-  toExpr(nodeName) {
+  toExpr(getName) {
     if (this.expr) return super.toExpr()
-    return `[${this.positive ? OP_LOOKAHEAD : OP_NEG_LOOKAHEAD}, ${nodeName(this.start)}]`
+    return `[${this.positive ? OP_LOOKAHEAD : OP_NEG_LOOKAHEAD}, ${getName(this.start.name)}]`
   }
 
   forEach(f) { f(this); if (this.expr) this.expr.forEach(f) }
