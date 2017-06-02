@@ -1,68 +1,84 @@
 const {Call, Token} = require("./graph")
 const {OP_CALL, OP_TOKEN} = require("./matchexpr")
 
-function buildEdgeInfo(graphs, getName) {
-  let edgeList = [], exprN = 0
+function buildEdgeInfo(graphs, getName, options) {
+  let edgeList = [], matchN = 0
 
-  for (let name in graphs) graphs[name].edges(({match, effect, to}) => {
-    let expr
-    if (effect instanceof Call) {
-      expr = `[${OP_CALL}, ${getName(effect.target.name)}]` // FIXME context
-    } else {
-      expr = match.toExpr(getName)
-      if (effect instanceof Token) expr = `[${OP_TOKEN}, ${expr}]`
-    }
-    let useExpr = -1
-    if (expr.length > 8) for (let i = 0; i < edgeList.length; i++) {
-      let other = edgeList[i]
-      if (other.expr == expr) {
-        useExpr = other.useExpr == -1 ? other.useExpr = exprN++ : other.useExpr
-        break
+  for (let name in graphs) {
+    let graph = graphs[name]
+    for (let node = 0; node < graph.nodes.length; node++) {
+      let edges = graph.nodes[node], nodeName = getName(name, node)
+      for (let i = 0; i < edges.length; i++) {
+        let {match, effect, to} = edges[i], matchStr
+        if (effect instanceof Call) {
+          matchStr = `[${OP_CALL}, ${getName(effect.target.name)}]` // FIXME context
+        } else {
+          matchStr = match.toExpr(getName)
+          if (effect instanceof Token) matchStr = `[${OP_TOKEN}, ${matchStr}]`
+        }
+        let useMatch = -1
+        if (matchStr.length > 8 && !options.names) for (let j = 0; j < edgeList.length; j++) {
+          let other = edgeList[j]
+          if (other.match == matchStr) {
+            useMatch = other.useMatch == -1 ? other.useMatch = matchN++ : other.useMatch
+            break
+          }
+        }
+        edgeList.push({
+          from: nodeName,
+          to: to == null ? -1 : getName(name, to),
+          match: useMatch == -1 ? matchStr : null,
+          useMatch
+        })
       }
     }
-    edgeList.push({
-      expr: useExpr == -1 ? expr : null,
-      useExpr,
-      to: to == null ? -1 : to
-    })
-  })
+  }
   return edgeList
 }
 
 function compileEdge(edgeInfo) {
-  let match = edgeInfo.useExpr != -1 ? `e[${edgeInfo.useExpr}]` : edgeInfo.expr
+  let match = edgeInfo.useMatch != -1 ? `e[${edgeInfo.useMatch}]` : edgeInfo.match
   return `${match}, ${edgeInfo.to}`
 }
 
+function buildNamer(graphs, options) {
+  if (options.names) {
+    return (graphName, node) => JSON.stringify(graphName + (node ? "$" + node : ""))
+  } else {
+    let offsets = {}, offset = 0
+    for (let name in graphs) {
+      offsets[name] = offset
+      offset += graphs[name].nodes.length
+    }
+    return (graphName, node) => offsets[graphName] + (node || 0)
+  }
+}
+
 module.exports = function(graphs, options = {}) {
-  let getName = options.names ? JSON.stringify : (() => {
-    let names = Object.keys(graphs)
-    return n => names.indexOf(n)
-  })()
-  let edgeInfo = buildEdgeInfo(graphs, getName)
+  let getName = buildNamer(graphs, options)
+  let edgeInfo = buildEdgeInfo(graphs, getName, options)
 
   let exprVector = []
   for (let i = 0; i < edgeInfo.length; i++) {
     let info = edgeInfo[i]
-    if (info.useExpr > -1 && info.expr) exprVector[info.useExpr] = info.expr
+    if (info.useMatch > -1 && info.match) exprVector[info.useMatch] = info.match
   }
 
   let code = "", exp = options.esModule ? "export var " : "exports."
   if (exprVector.length) code += `var e = [${exprVector.join(", ")}]\n`
-  let graphCode = [], edgeIndex = 0
-  for (let name in graphs) {
-    let graph = graphs[name], nodeCode = []
-    for (let i = 0; i < graph.nodes.length; i++) {
-      let edges = graph.nodes[i], edgeCode = []
-      for (let j = 0; j < edges.length; j++)
-        edgeCode.push(compileEdge(edgeInfo[edgeIndex++]))
-      nodeCode.push(`[${edgeCode.join(",\n     ")}]`)
+  let edges = [], nodes = []
+  for (let curNode = edgeInfo[0].from, i = 0;; i++) {
+    let info = edgeInfo[i]
+    if (!info || info.from != curNode) {
+      if (options.names) nodes.push(`${curNode}: [\n    ${edges.join(",\n    ")}\n  ]`)
+      else nodes.push(`[${edges.join(",\n   ")}]`)
+      if (!info) break
+      curNode = info.from
+      edges.length = 0
     }
-    let nodeCodeFlat = `[\n    ${nodeCode.join(",\n    ")}\n  ]`
-    if (options.names) graphCode.push(`${name}: ${nodeCodeFlat}`)
-    else graphCode.push(nodeCodeFlat)
+    edges.push(compileEdge(info))
   }
-  code += `${exp}graphs = ${options.names ? "{" : "["}\n  ${graphCode.join(",\n  ")}\n${options.names ? "}" : "]"}\n`
+  code += `${exp}graph = ${options.names ? "{" : "["}\n  ${nodes.join("\n  ")}\n${options.names ? "}" : "]"}\n`
 
   return code
 }
