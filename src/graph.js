@@ -1,199 +1,344 @@
 const {nullMatch, anyMatch, dotMatch, StringMatch, RangeMatch, SeqMatch,
        ChoiceMatch, RepeatMatch, LookaheadMatch, PredicateMatch} = require("./matchexpr")
+const {normalizeExpr, eqExprs, instantiateArgs} = require("./ast")
 
-exports.buildGraph = function(grammar, options) {
-  let {rules, start, tokens} = Rule.fromGrammar(grammar)
-  let graph = new Graph(rules)
-  graph.buildStartNode(start)
-  if (options.tokens !== false) graph.buildTokenNode(tokens)
-  graph.mergeNullEdges()
-  return graph
+exports.buildGraph = function(grammar, _options) {
+  let {rules, start/*, tokens*/} = gatherRules(grammar)
+  let cx = new Context(rules, Object.create(null))
+  let startGraph = cx.registerGraph("_start", new SubGraph)
+  // FIXME guard against infinite loops
+  startGraph.edge(0, 0, nullMatch, new Call(cx.getRuleGraph(start, [])))
+
+  return cx.graphs //gcGraphs(cx.graphs, ".start")
+}
+
+class Call {
+  constructor(target) { this.target = target }
+  toString() { return `CALL(${this.target.name})` }
+}
+class Token {
+  constructor(type) { this.type = type }
+  toString() { return `TOKEN(${this.type})` }
 }
 
 class Edge {
-  constructor(to, match, call) {
+  constructor(to, match, effect) {
     this.to = to
     this.match = match
-    this.call = call
+    this.effect = effect
   }
 
-  toString(from) {
-    let result = `${from || ""} -> ${this.to || "RET"}`, label = this.match.toRegexp()
-    if (this.call) label = (label ? label + " " : "") + `CALL(${this.call})`
+  toString(graph, from) {
+    let result = `${graph}_${from} -> ${graph}_${this.to == null ? "RET" : this.to}`, label = this.match.toRegexp()
+    if (this.effect) label = (label ? label + " " : "") + this.effect.toString()
     if (label) result += `[label=${JSON.stringify(label)}]`
     return result
   }
 }
 
-function buildNode(type, from, props) {
-  props.type = type
-  props.start = from.start
-  props.end = from.end
-  return props
-}
-
-const noSkipAfter = ["LookaheadMatch", "PredicateMatch", "Label", "RepeatedMatch"]
-
-// Replaces super matches, inserts skip matches in the appropriate
-// places, splits string matches with newlines, and collapses nested
-// sequence/choice expressions, so that further passes don't have to
-// worry about those.
-function normalizeExpr(expr, ruleName, superGrammar, skip) {
-  if (expr.type == "StringMatch" && expr.value > 1 && expr.value.indexOf("\n") > -1) {
-    let exprs = []
-    expr.value.split(/(?=\n)/).forEach(part => {
-      exprs.push(buildNode("StringMatch", expr, {value: "\n"}))
-      if (part.length > 1) exprs.push(buildNode("StringMatch", expr, {value: part.slice(1)}))
-    })
-    return buildNode("SequenceMatch", expr, {exprs})
-  } else if (expr.type == "RepeatedMatch") {
-    let inner = normalizeExpr(expr.expr, ruleName, superGrammar, skip)
-    if (skip) inner = buildNode("SequenceMatch", inner, {exprs: [inner, skip]})
-    expr.expr = inner
-  } else if (expr.type == "LookaheadMatch") {
-    expr.expr = normalizeExpr(expr.expr, ruleName, null, skip)
-  } else if (expr.type == "SequenceMatch") {
-    let exprs = []
-    for (let i = 0; i < expr.exprs.length; i++) {
-      let next = normalizeExpr(expr.exprs[i], ruleName, superGrammar, skip)
-      if (next.type == "SequenceMatch") exprs = exprs.concat(next.exprs)
-      else exprs.push(next)
-      if (skip && i < expr.exprs.length - 1 && noSkipAfter.indexOf(next.type) < 0)
-        exprs.push(skip)
-    }
-    expr.exprs = exprs
-  } else if (expr.type == "ChoiceMatch") {
-    let exprs = []
-    for (let i = 0; i < expr.exprs.length; i++) {
-      let next = normalizeExpr(expr.exprs[i], ruleName, superGrammar, skip)
-      if (next.type == "ChoiceMatch") exprs = exprs.concat(next.exprs)
-      else exprs.push(next)
-    }
-    expr.exprs = exprs
-  } else if (expr.type == "SuperMatch") {
-    for (let grammar = superGrammar; grammar; grammar = grammar.super) {
-      let rule = grammar.rules[ruleName]
-      if (rule) return normalizeExpr(rule.expr, ruleName, grammar.super, skip)
-    }
-    throw new SyntaxError(`No super rule found for '${ruleName}'`)
-  }
-  return expr
-}
-
-function forEachExpr(expr, f) {
-  if (f(expr) === false) return
-  if (expr.type == "RepeatedMatch" || expr.type == "LookaheadMatch")
-    forEachExpr(expr.expr, f)
-  else if (expr.type == "SequenceMatch" || expr.type == "ChoiceMatch")
-    for (let i = 0; i < expr.exprs.length; i++) forEachExpr(expr.exprs[i], f)
-}
-
-function findReferences(expr) {
-  let set = []
-  forEachExpr(expr, expr => {
-    if (expr.type == "LookaheadExpr") return false
-    if (expr.type == "RuleIdentifier") {
-      let name = expr.id.name
-      if (set.indexOf(name) < 0) set.push(name)
-    }
-  })
-  return set
-}
-
-function hasIsolatedMatches(expr) {
-  let found = false
-  forEachExpr(expr, expr => {
-    if (expr.type == "LookaheadExpr") return false
-    if (!found &&
-        (expr.type == "AnyMatch" ||
-         expr.type == "StringMatch" && expr.string == "\n" ||
-         expr.type == "RangeMatch" && expr.from <= "\n" && expr.to >= "\n"))
-      found = true
-  })
-  return found
-}
-
-function canBeNull(expr, rules) {
-  if (expr.type == "RepeatedMatch") {
-    return expr.kind == "+" ? canBeNull(expr.expr, rules) : true
-  } else if (expr.type == "LookaheadMatch" || expr.type == "Label" || expr.type == "PredicateMatch") {
-    return true
-  } else if (expr.type == "SequenceMatch") {
-    for (let i = 0; i < expr.exprs.length; i++)
-      if (!canBeNull(expr.exprs[i], rules)) return false
-    return true
-  } else if (expr.type == "ChoiceMatch") {
-    for (let i = 0; i < expr.exprs.length; i++)
-      if (canBeNull(expr.exprs[i], rules)) return true
-    return false
-  } else if (expr.type == "RuleIdentifier") {
-    return rules[expr.id.name].canBeNull(rules)
-  } else {
-    return false
-  }
-}
-
-function checkExpr(expr, rules) {
-  forEachExpr(expr, expr => {
-    if (expr.type == "RepeatMatch" && expr.kind != "?" && canBeNull(expr.expr, rules))
-      throw new Error(`Expressions that don't make progress (can match the empty string) can't have '${expr.kind}' applied to them`)
-    else if (expr.type == "RuleIdentifier" && !(expr.id.name in rules))
-      throw new Error(`Reference to undefined rule '${expr.id.name}'`)
-    else if (expr.type == "SuperMatch")
-      throw new Error("'super' in invalid position")
-  })
-}
-
 class Rule {
-  constructor(name, ast, grammar) {
+  constructor(name, expr, params, context) {
     this.name = name
-    this.context = ast.context || ast.tokenType
-    this.tokenType = ast.tokenType
-    this.expr = normalizeExpr(ast.expr, name, grammar.super, ast.skip)
-    this.matchExpr = null
-    this.instances = Object.create(null)
-    this.params = ast.params && ast.params.map(id => id.name)
-    this.references = findReferences(this.expr)
-    this.flat = hasIsolatedMatches(this.expr) ? false : null
-    this._canBeNull = null
-    this._startNode = null
+    this.expr = expr
+    this.params = params
+    this.context = context
+    this.instances = []
   }
 
-  canBeNull(rules) {
-    if (this._canBeNull == null) this._canBeNull = canBeNull(this.expr, rules)
-    return this._canBeNull
-  }
-
-  startNode(graph, _args) { // FIXME handle args
-    if (this._startNode == null) {
-      this._startNode = graph.newNode(this.name)
-      evalRuleExpr(graph, this.expr, this._startNode)
-    }
-    return this._startNode
-  }
-
-  static fromGrammar(grammar) {
-    let info = {rules: Object.create(null), start: null, tokens: []}
-    Rule.gather(grammar, info)
-    for (let name in info.rules) checkExpr(info.rules[name].expr, info.rules)
-    Rule.computeFlat(info.rules)
-    return info
-  }
-
-  static computeFlat(rules) {
-    // Fixpoint to figure out which rules can be recursively flattened
-    for (;;) {
-      let changed = false
-      for (let name in rules) {
-        let rule = rules[name]
-        if (rule.flat === null && !rule.references.some(ref => rules[ref].flat !== true))
-          changed = rule.flat = true
+  getInstance(cx, args) {
+    for (let i = 0; i < this.instances.length; i++) {
+      let inst = this.instances[i]
+      if (eqExprs(inst.args, args)) {
+        if (inst.graph.recursive !== false)
+          inst.graph.recursive = true
+        return inst.graph
       }
-      if (!changed) break
+    }
+    let graph = cx.registerGraph(this.name, new SubGraph(this.context))
+    this.instances.push({args, graph})
+    let result = cx.evalExpr(instantiateArgs(this.params, args, this.expr), graph.node(), null)
+    graph.copy(0, null, result)
+    if (graph.recursive === null) graph.recursive = false
+    return graph
+  }
+}
+
+class SubGraph {
+  constructor(context) {
+    this.name = null
+    this.nodes = [[]]
+    this.recursive = null
+    this.context = context
+  }
+
+  get edgeCount() {
+    let count = 0
+    for (let i = 0; i < this.nodes.length; i++)
+      count += this.nodes[i].length
+    return count
+  }
+
+  node() {
+    return this.nodes.push([]) - 1
+  }
+
+  edge(from, to, match, effect) {
+    this.nodes[from].push(new Edge(to, match, effect))
+  }
+
+  copy(from, to, source, start = 0) {
+    let mapping = []
+    mapping[start] = from
+    let work = [start], workIndex = 0
+    while (workIndex < work.length) {
+      let cur = work[workIndex++], edges = source.nodes[cur]
+      for (let i = 0; i < edges.length; i++) {
+        let edge = edges[i]
+        if (edge.to != null && work.indexOf(edge.to) == -1) {
+          mapping[edge.to] = this.node()
+          work.push(edge.to)
+        }
+        this.edge(mapping[cur], edge.to == null ? to : mapping[edge.to], edge.match, edge.effect)
+      }
     }
   }
 
-  static gather(grammar, ruleInfo) {
+  forEachRef(f) {
+    for (let i = 0; i < this.nodes.length; i++) {
+      let edges = this.nodes[i]
+      for (let j = 0; j < edges.length; j++) {
+        let edge = edges[j]
+        f(edge.to, edge, "to")
+        edge.match.forEach(expr => {
+          if (expr instanceof LookaheadMatch && expr.start != null)
+            f(edge.start, expr, "start")
+        })
+      }
+    }
+  }
+
+  countReferences(node) {
+    let count = 0
+    this.forEachRef(ref => { if (ref == node) count++ })
+    return count
+  }
+
+  merge(a, b) {
+    this.nodes.splice(b, 1)
+    if (a > b) a--
+    this.forEachRef((node, obj, prop) => {
+      if (node >= b) obj[prop] = node == b ? a : node - 1
+    })
+  }
+
+  mergeNullEdges() {
+    for (let node = 0; node < this.nodes.length; node++) {
+      let edges = this.nodes[node], edge = edges[edges.length - 1]
+      if (edge.match == nullMatch && !edge.call && edge.to != null &&
+          (edges.length == 1 || this.countReferences(edge.to) == 1)) {
+        this.nodes[node] = edges.slice(0, edges.length - 1).concat(this.nodes[edge.to])
+        this.merge(node, edge.to)
+        node = -1 // Restart loop
+      }
+    }
+  }
+
+  toString() {
+    let output = ""
+    for (let node = 0; node < this.nodes.length; node++) {
+      let edges = this.nodes[node]
+      for (let i = 0; i < edges.length; i++)
+        output += "  " + edges[i].toString(this.name, node) + ";\n"
+    }
+    return output
+  }
+
+  singleEdgeFrom(node) {
+    let edges = this.nodes[node]
+    return edges.length == 1 ? edges[0] : null
+  }
+
+  singleEdgeTo(node) {
+    let edge = null
+    for (let i = 0; i < this.nodes.length; i++) {
+      let edges = this.nodes[i]
+      for (let j = 0; j < edges.length; j++) {
+        if (edges[j].to == node) {
+          if (edge == null) edge = edges[j]
+          else return null
+        }
+      }
+    }
+    return edge
+  }
+
+  get simple() {
+    if (this.nodes.length != 1) return null
+    let node = this.nodes[0]
+    if (node.length != 1 || node[0].effect) return null
+    return node[0].match
+  }
+
+  static simple(match, effect) {
+    let graph = new SubGraph
+    graph.edge(0, null, match, effect)
+    return graph
+  }
+}
+
+SubGraph.any = SubGraph.simple(anyMatch)
+SubGraph.dot = SubGraph.simple(dotMatch)
+
+const MAX_INLINE_EDGE_COUNT = 5
+
+class Context {
+  constructor(rules, graphs) {
+    this.rules = rules
+    this.graphs = graphs
+  }
+
+  registerGraph(name, graph) {
+    for (let i = 0;; i++) {
+      let cur = name + (i ? "_" + i : "")
+      if (!(cur in this.graphs)) {
+        graph.name = cur
+        return this.graphs[cur] = graph
+      }
+    }
+  }
+
+  getRuleGraph(name, args) {
+    let rule = this.rules[name]
+    if (!rule) throw new Error("Undefined rule " + name)
+    if (args.length != rule.params.length) throw new Error("Wrong number of arguments for " + name)
+    return rule.getInstance(this, args)
+  }
+
+  evalExpr(expr, continued) {
+    let t = expr.type
+    if (t == "CharacterRange") {
+      return SubGraph.simple(new RangeMatch(expr.from, expr.to))
+    } else if (t == "StringMatch") {
+      return SubGraph.simple(new StringMatch(expr.value))
+    } else if (t == "AnyMatch") {
+      return SubGraph.any
+    } else if (t == "DotMatch") {
+      return SubGraph.dot
+    } else if (t == "RuleIdentifier") {
+      let graph = this.getRuleGraph(expr.id.name, expr.arguments)
+      if (!graph.recursive && !graph.context && graph.edgeCount <= MAX_INLINE_EDGE_COUNT)
+        return graph
+      else
+        return SubGraph.simple(nullMatch, new Call(graph))
+    } else if (t == "RepeatedMatch") {
+      return this.evalRepeat(expr.expr, expr.kind, continued)
+    } else if (t == "SequenceMatch") {
+      return this.evalSequence(expr.exprs)
+    } else if (t == "ChoiceMatch") {
+      return this.evalChoice(expr.exprs)
+    } else if (t == "LookaheadMatch") {
+      let inner = this.evalExpr(expr.expr), simple = inner.simple, match
+      if (simple) {
+        match = new LookaheadMatch(null, simple, expr.kind == "~")
+      } else {
+        this.registerGraph("_lookahead", inner)
+        match = new LookaheadMatch(inner, null, expr.kind == "~")
+      }
+      return SubGraph.simple(match)
+    } else if (t == "PredicateMatch") {
+      return SubGraph.simple(new PredicateMatch(expr.id.name))
+    } else {
+      throw new Error("Unrecognized AST node type " + t)
+    }
+  }
+
+  evalRepeat(expr, kind, continued) {
+    let inner = this.evalExpr(expr), simple
+    if ((continued || kind == "+") && (simple = inner.simple) && !simple.isolated)
+      return SubGraph.simple(new RepeatMatch(simple, kind))
+    let graph = new SubGraph
+    if (kind == "*") {
+      graph.copy(0, 0, inner)
+      graph.edge(0, null, nullMatch)
+    } else if (kind == "+") {
+      let next = graph.node()
+      graph.copy(0, next, inner)
+      graph.copy(next, next, inner)
+      graph.edge(next, null, nullMatch)
+    } else if (kind == "?") {
+      graph.copy(0, null, inner)
+      graph.edge(0, null, nullMatch)
+    }
+    return graph
+  }
+
+  evalSequence(exprs) {
+    let graph = new SubGraph, node = 0, lastEdge = null
+    for (let i = 0, last = exprs.length - 1, next = null; i <= last; i++) {
+      let curGraph = next || this.evalExpr(exprs[i]), simple = curGraph.simple
+      next = null
+      if (simple) while (i < last) {
+        let nextExpr = this.evalExpr(exprs[i + 1], true)
+        let nextSimple = nextExpr.simple
+        if (nextSimple && SeqMatch.canCombine(simple, nextSimple)) {
+          simple = SeqMatch.create(simple, nextSimple)
+          i++
+        } else {
+          next = nextExpr
+          break
+        }
+      }
+      lastEdge = null
+      let end = i == last ? null : graph.node()
+      if (simple) {
+        if (lastEdge && !lastEdge.effect && SeqMatch.canCombine(lastEdge.match, simple))
+          lastEdge.match = SeqMatch.create(lastEdge.match, simple)
+        else
+          lastEdge = graph.edge(node, end, simple)
+      } else {
+        let firstEdge, copyFrom = 0
+        if (lastEdge && !lastEdge.effect &&
+            (firstEdge = curGraph.singleEdgeFrom(0)) && !firstEdge.effect &&
+            SeqMatch.canCombine(lastEdge.match, firstEdge.match)) {
+          lastEdge.match = SeqMatch.create(lastEdge.match, firstEdge.match)
+          copyFrom = firstEdge.to
+        }
+        graph.copy(node, end, curGraph, copyFrom)
+        lastEdge = graph.singleEdgeTo(end)
+      }
+      node = end
+    }
+    return graph
+  }
+
+  evalChoice(exprs) {
+    let graph = new SubGraph
+    for (let i = 0, last = exprs.length - 1, next = null; i <= last; i++) {
+      let curGraph = next || this.evalExpr(exprs[i]), simple = curGraph.simple
+      next = null
+      if (simple) {
+        while (i < last) {
+          let nextExpr = this.evalExpr(exprs[i + 1]), nextSimple = nextExpr.simple
+          if (nextSimple) {
+            simple = ChoiceMatch.create(simple, nextSimple)
+            i++
+          } else {
+            next = nextExpr
+            break
+          }
+        }
+        graph.edge(0, null, simple)
+      } else {
+        graph.copy(0, null, curGraph)
+      }
+    }
+    return graph
+  }
+}
+
+function gatherRules(grammar) {
+  let info = {rules: Object.create(null), start: null, tokens: []}
+  function gather(grammar) {
     let explicitStart = null
     for (let name in grammar.rules) {
       let ast = grammar.rules[name]
@@ -201,214 +346,18 @@ class Rule {
         if (explicitStart) throw new Error("Multiple start rules")
         explicitStart = name
       }
-      if (ruleInfo.rules[name]) continue
-      ruleInfo.rules[name] = new Rule(name, ast, grammar)
+      if (info.rules[name]) continue
+      let expr = normalizeExpr(ast.expr, name, grammar.super, ast.skip)
+      info.rules[name] = new Rule(name, expr, ast.params.map(n => n.name),
+                                  ast.tokenType ? {token: ast.tokenType} : !!ast.context)
     }
-    if (grammar.super) Rule.gather(grammar.super, ruleInfo)
-    if (explicitStart) ruleInfo.start = explicitStart
+    if (grammar.super) gather(grammar.super)
+    if (explicitStart) info.start = explicitStart
     for (let name in grammar.rules) {
-      if (ruleInfo.start == null) ruleInfo.start = name
-      if (grammar.rules[name].isToken && ruleInfo.tokens.indexOf(name) == -1) ruleInfo.tokens.push(name)
+      if (info.start == null) info.start = name
+      if (grammar.rules[name].isToken && info.tokens.indexOf(name) == -1) info.tokens.push(name)
     }
   }
-}
-
-class Graph {
-  constructor(rules) {
-    this.rules = rules
-    this.nodes = Object.create(null)
-    this.start = null
-  }
-
-  newNode(label) {
-    for (let i = 0;; i++) {
-      let name = label + (i ? "_" + i : "")
-      if (!(name in this.nodes)) {
-        this.nodes[name] = []
-        return name
-      }
-    }
-  }
-
-  edge(from, to, match, call) {
-    let edge = new Edge(to, match, call)
-    this.nodes[from].push(edge)
-    return edge
-  }
-
-  buildStartNode(name) {
-    let startRule = this.rules[name]
-    if (startRule.canBeNull(this.rules)) // FIXME maybe handle by inserting an anymatch?
-      throw new Error("Start rule should consume input")
-    this.start = this.newNode("START")
-    this.edge(this.start, this.start, nullMatch, startRule.startNode(this, []))
-  }
-
-  buildTokenNode(_tokens) {
-    // FIXME
-  }
-
-  findReferences(name, f) {
-    if (this.start == name) f(this, "start")
-    if (this.token == name) f(this, "token")
-    for (let node in this.nodes) {
-      let edges = this.nodes[node]
-      for (let i = 0; i < edges.length; i++) {
-        let edge = edges[i]
-        if (edge.to == name) f(edge, "to")
-        if (edge.call == name) f(edge, "call")
-        edge.match.forEach(expr => {
-          if (expr instanceof LookaheadMatch && expr.start === name) f(expr, "start")
-        })
-      }
-    }
-  }
-
-  countReferences(name) {
-    let count = 0
-    this.findReferences(name, () => count++)
-    return count
-  }
-
-  merge(a, b) {
-    delete this.nodes[b]
-    this.findReferences(b, (obj, prop) => obj[prop] = a)
-  }
-
-  mergeNullEdges() {
-    for (;;) {
-      let changed = false
-      for (let name in this.nodes) {
-        let edges = this.nodes[name], edge = edges[edges.length - 1]
-        if (edge.match == nullMatch && !edge.call && edge.to &&
-            (edges.length == 1 || this.countReferences(edge.to) == 1)) {
-          this.nodes[name] = edges.slice(0, edges.length - 1).concat(this.nodes[edge.to])
-          this.merge(name, edge.to)
-          changed = true
-        }
-      }
-      if (!changed) break
-    }
-  }
-
-  toString() {
-    let output = "digraph {\n"
-    for (let node in this.nodes) {
-      let edges = this.nodes[node]
-      for (let i = 0; i < edges.length; i++)
-        output += "  " + edges[i].toString(node) + ";\n"
-    }
-    return output + "}\n"
-  }
-}
-
-function evalRuleExpr(graph, expr, start) {
-  if (!start) start = graph.newNode("FOO")
-  evalExpr(graph, expr, start, null)
-  return start
-}
-
-function evalSimpleExpr(graph, expr) {
-  return expr.simpleValue || (expr.simpleValue = evalSimpleExprInner(graph, expr))
-}
-
-function evalSimpleExprInner(graph, expr) {
-  let t = expr.type
-  if (t == "CharacterRange") {
-    return new RangeMatch(expr.from, expr.to)
-  } else if (t == "StringMatch") {
-    return new StringMatch(expr.value)
-  } else if (t == "AnyMatch") {
-    return anyMatch
-  } else if (t == "DotMatch") {
-    return dotMatch
-  } else if (t == "RuleIdentifier") { // FIXME also inline small, non-context rules
-    let rule = graph.rules[expr.id.name]
-    if (!rule.flat || rule.context) return null
-    return rule.matchExpr || (rule.matchExpr = evalSimpleExpr(graph, rule.expr))
-  } else if (t == "RepeatedMatch") {
-    let inner = evalSimpleExpr(graph, expr.expr)
-    if (inner == null) return null
-    return new RepeatMatch(inner, expr.kind)
-  } else if (t == "SequenceMatch" || t == "ChoiceMatch") {
-    let result = null
-    for (let i = 0; i < expr.exprs.length; i++) {
-      let m = evalSimpleExpr(graph, expr.exprs[i])
-      if (m == null || result != null && !SeqMatch.canCombine(result, m)) return null
-      result = result == null ? m : (t == "SequenceMatch" ? SeqMatch : ChoiceMatch).create(result, m)
-    }
-    return result
-  } else if (t == "LookaheadMatch") {
-    let inner = evalSimpleExpr(graph, expr.expr)
-    if (inner != null) return new LookaheadMatch(null, inner, expr.kind == "~")
-    return new LookaheadMatch(evalRuleExpr(graph, expr.expr), null, expr.kind == "~")
-  } else if (t == "PredicateMatch") {
-    return new PredicateMatch(expr.id.name)
-  } else {
-    throw new Error("Unrecognized AST node type " + t)
-  }
-}
-
-function evalExpr(graph, expr, start, end) {
-  let simple = evalSimpleExpr(graph, expr)
-  if (simple) {
-    graph.edge(start, end, simple)
-  } else if (expr.type == "RuleIdentifier") {
-    let rule = graph.rules[expr.id.name]
-    // FIXME properly compile args
-    graph.edge(start, end, nullMatch, rule.startNode(graph, expr.args))
-  } else if (expr.type == "RepeatedMatch") {
-    if (expr.kind == "*") {
-      let copy = graph.newNode("DUP")
-      graph.edge(start, copy, nullMatch)
-      evalExpr(graph, expr.expr, copy, copy)
-      graph.edge(copy, end, nullMatch) // FIXME this is not good
-    } else if (expr.kind == "+") {
-      let next = graph.newNode("NEXT")
-      evalExpr(graph, expr.expr, start, next)
-      evalExpr(graph, expr.expr, next, next)
-    } else if (expr.kind == "?") {
-      evalExpr(graph, expr.expr, start, end)
-      graph.edge(start, end, nullMatch)
-    }
-  } else if (expr.type == "SequenceMatch") {
-    for (let i = 0; i < expr.exprs.length; i++) {
-      let cur = expr.exprs[i], simple = evalSimpleExpr(graph, cur), call
-      if (simple) while (!simple.isolated && i < expr.exprs.length - 1) {
-        let next = expr.exprs[i + 1], nextSimple = evalSimpleExpr(graph, next)
-        if (nextSimple && SeqMatch.canCombine(simple, nextSimple)) {
-          simple = SeqMatch.create(simple, nextSimple)
-          i++
-        } else if (next.type == "CallExpression" &&
-                   (simple.isNull || !graph.rules[next.id.name].context)) {
-          call = graph.rules[next.id.name].startNode(graph, next.args)
-          i++
-          break
-        } else {
-          break
-        }
-      }
-      let after = i == expr.exprs.length - 1 ? end : graph.newNode("UGH")
-      if (simple) graph.edge(start, after, simple, call)
-      else evalExpr(graph, cur, start, after)
-      start = after
-    }
-  } else if (expr.type == "ChoiceMatch") {
-    for (let i = 0; i < expr.exprs.length; i++) {
-      let simple = evalSimpleExpr(graph, expr.exprs[i]), next
-      if (simple) {
-        while (!simple.isolated && i < expr.exprs.length - 1 &&
-               (next = evalSimpleExpr(graph, expr.exprs[i + 1])) &&
-               !next.isolated) {
-          simple = ChoiceMatch.create(simple, next)
-          i++
-        }
-        graph.edge(start, end, simple)
-      } else {
-        evalExpr(graph, expr.exprs[i], start, end)
-      }
-    }
-  } else {
-    throw new Error("Fell through with " + expr.type)
-  }
+  gather(grammar)
+  return info
 }

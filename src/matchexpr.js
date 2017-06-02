@@ -149,6 +149,8 @@ class ChoiceMatch extends MatchExpr {
 
   get simple() { return this.matches.every(m => m.simple) }
 
+  get isolated() { return this.matches.some(m => m.isolated) }
+
   eq(other) { return other instanceof ChoiceMatch && eqArray(other.matches, this.matches) }
 
   get regexpPrec() { return 1 }
