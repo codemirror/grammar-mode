@@ -5,7 +5,11 @@ function build(type, from, props) {
   return props
 }
 
-const noSkipAfter = ["LookaheadMatch", "PredicateMatch", "Label", "RepeatedMatch"]
+function noSkipAfter(node) {
+  let t = node.type
+  return t == "LookaheadMatch" || t == "PredicateMatch" || t == "Label" ||
+    t == "RepeatedMatch" && node.kind != "?"
+}
 
 // Replaces super matches, inserts skip matches in the appropriate
 // places, splits string matches with newlines, and collapses nested
@@ -24,7 +28,7 @@ let normalizeExpr = exports.normalizeExpr = function(expr, ruleName, superGramma
       expr.arguments[i] = normalizeExpr(expr.arguments[i], ruleName, superGrammar, skip)
   } else if (expr.type == "RepeatedMatch") {
     let inner = normalizeExpr(expr.expr, ruleName, superGrammar, skip)
-    if (skip) inner = build("SequenceMatch", inner, {exprs: [inner, skip]})
+    if (skip && expr.kind != "?") inner = build("SequenceMatch", inner, {exprs: [inner, skip]})
     expr.expr = inner
   } else if (expr.type == "LookaheadMatch") {
     expr.expr = normalizeExpr(expr.expr, ruleName, null, skip)
@@ -34,7 +38,7 @@ let normalizeExpr = exports.normalizeExpr = function(expr, ruleName, superGramma
       let next = normalizeExpr(expr.exprs[i], ruleName, superGrammar, skip)
       if (next.type == "SequenceMatch") exprs = exprs.concat(next.exprs)
       else exprs.push(next)
-      if (skip && i < expr.exprs.length - 1 && noSkipAfter.indexOf(next.type) < 0)
+      if (skip && i < expr.exprs.length - 1 && !noSkipAfter(next))
         exprs.push(skip)
     }
     expr.exprs = exprs

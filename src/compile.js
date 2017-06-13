@@ -1,5 +1,4 @@
 const {Call, Token} = require("./graph")
-const {OP_CALL, OP_TOKEN} = require("./matchexpr")
 
 function buildEdgeInfo(graphs, getName, options) {
   let edgeList = [], matchN = 0
@@ -9,13 +8,7 @@ function buildEdgeInfo(graphs, getName, options) {
     for (let node = 0; node < graph.nodes.length; node++) {
       let edges = graph.nodes[node], nodeName = getName(name, node)
       for (let i = 0; i < edges.length; i++) {
-        let {match, effect, to} = edges[i], matchStr
-        if (effect instanceof Call) {
-          matchStr = `[${OP_CALL}, ${getName(effect.target.name)}]` // FIXME context
-        } else {
-          matchStr = match.toExpr(getName)
-          if (effect instanceof Token) matchStr = `[${OP_TOKEN}, ${matchStr}]`
-        }
+        let {match, effect, to} = edges[i], matchStr = match.toExpr(getName)
         let useMatch = -1
         if (matchStr.length > 8 && !options.names) for (let j = 0; j < edgeList.length; j++) {
           let other = edgeList[j]
@@ -26,9 +19,11 @@ function buildEdgeInfo(graphs, getName, options) {
         }
         edgeList.push({
           from: nodeName,
-          to: to == null ? -1 : getName(name, to),
+          to,
           match: useMatch == -1 ? matchStr : null,
-          useMatch
+          useMatch,
+          effect,
+          graph: name
         })
       }
     }
@@ -36,9 +31,25 @@ function buildEdgeInfo(graphs, getName, options) {
   return edgeList
 }
 
-function compileEdge(edgeInfo) {
+// An edge can be one of the following:
+// 0, nextNode                           null edge
+// 1, callTarget, returnTo               regular call
+// 2, callTarget, returnTo, context      context call
+// 3, tokenType, matchExpr, nextNode     token edge
+// matchExpr, nextNode                   regular match edge
+function compileEdge(edgeInfo, getName) {
+  let to = edgeInfo.to == null ? -1 : getName(edgeInfo.graph, edgeInfo.to)
+  if (edgeInfo.effect instanceof Call) {
+    let {target, context} = edgeInfo.effect
+    if (!context) return `1, ${getName(target.name)}, ${to}`
+    return `2, ${getName(target.name)}, ${to}, ${JSON.stringify(context)}`
+  }
   let match = edgeInfo.useMatch != -1 ? `e[${edgeInfo.useMatch}]` : edgeInfo.match
-  return `${match}, ${edgeInfo.to}`
+  if (edgeInfo.effect instanceof Token)
+    return `3, ${JSON.stringify(edgeInfo.effect.type)}, ${match}, ${to}`
+  if (match == "null")
+    return `0, ${to}`
+  return `${match}, ${to}`
 }
 
 function buildNamer(graphs, options) {
@@ -76,9 +87,12 @@ module.exports = function(graphs, options = {}) {
       curNode = info.from
       edges.length = 0
     }
-    edges.push(compileEdge(info))
+    edges.push(compileEdge(info, getName))
   }
-  code += `${exp}graph = ${options.names ? "{" : "["}\n  ${nodes.join("\n  ")}\n${options.names ? "}" : "]"}\n`
+  code += `${exp}nodes = ${options.names ? "{" : "["}\n  ${nodes.join(",\n  ")}\n${options.names ? "}" : "]"}\n`
+  code += `${exp}start = ${getName("_start")}\n`
+  if (options.tokens !== false)
+    code += `${exp}token = ${getName("_token")}\n`
 
   return code
 }

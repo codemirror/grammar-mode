@@ -22,7 +22,7 @@ exports.buildGraph = function(grammar, options) {
 }
 
 class Call {
-  constructor(target) { this.target = target }
+  constructor(target, context) { this.target = target; this.context = context }
   toString() { return `CALL(${this.target.name})` }
 }
 exports.Call = Call
@@ -244,7 +244,7 @@ class Context {
     else if (!graph.recursive && !graph.context && graph.edgeCount <= MAX_INLINE_EDGE_COUNT)
       return graph
     else
-      return SubGraph.simple(nullMatch, new Call(graph))
+      return SubGraph.simple(nullMatch, new Call(graph, graph.context))
   }
 
   evalRepeat(expr, kind, continued) {
@@ -326,7 +326,7 @@ function gatherRules(grammar) {
       if (info.rules[name]) continue
       let expr = normalizeExpr(ast.expr, name, grammar.super, ast.skip)
       info.rules[name] = new Rule(name, expr, ast.params.map(n => n.name),
-                                  ast.tokenType ? {token: ast.tokenType} : !!ast.context)
+                                  !ast.context && !ast.tokenType ? null : ast.tokenType ? {name, token: ast.tokenType} : {name})
     }
     if (grammar.super) gather(grammar.super)
     if (explicitStart) info.start = explicitStart

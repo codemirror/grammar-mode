@@ -14,9 +14,7 @@ function toSubRegexp(expr, wrapExpr) {
 const OP_SEQ = 0, OP_CHOICE = 1,
       OP_STAR = 2, OP_PLUS = 3, OP_MAYBE = 4,
       OP_LOOKAHEAD = 5, OP_NEG_LOOKAHEAD = 6,
-      OP_PREDICATE = 7, OP_CALL = 8, OP_TOKEN = 9
-exports.OP_CALL = OP_CALL
-exports.OP_TOKEN = OP_TOKEN
+      OP_PREDICATE = 7
 
 class MatchExpr {
   constructor() {}
