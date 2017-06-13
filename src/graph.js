@@ -45,6 +45,14 @@ class Edge {
     if (label) result += `[label=${JSON.stringify(label)}]`
     return result
   }
+
+  canCombine(other) {
+    if (this.effect instanceof Call || other.effect instanceof Call) return false
+    let thisIsolated = this.match.isolated || !!this.effect, otherIsolated = other.match.isolated || !!other.effect
+    return thisIsolated ? other.match.isNull && !otherIsolated
+      : otherIsolated ? this.match.isNull
+      : true
+  }
 }
 
 class Rule {
@@ -272,9 +280,7 @@ class Context {
     for (let i = 0; i < exprs.length; i++) {
       let next = this.evalExpr(exprs[i], edge && !edge.effect && !edge.match.isolated)
       let firstEdge, copyFrom = 0
-      if (edge && !edge.effect &&
-          (firstEdge = next.singleEdgeFrom(0)) && !firstEdge.effect &&
-          SeqMatch.canCombine(edge.match, firstEdge.match)) {
+      if (edge && (firstEdge = next.singleEdgeFrom(0)) && !firstEdge.effect && edge.canCombine(firstEdge)) {
         edge.match = SeqMatch.create(edge.match, firstEdge.match)
         copyFrom = firstEdge.to
       }

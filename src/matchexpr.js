@@ -134,10 +134,6 @@ class SeqMatch extends MatchExpr {
     let matches = before.concat(after)
     return matches.length == 1 ? matches[0] : new SeqMatch(matches)
   }
-
-  static canCombine(left, right) {
-    return left.isolated ? right.isNull : right.isolated ? left.isNull : true
-  }
 }
 exports.SeqMatch = SeqMatch
 

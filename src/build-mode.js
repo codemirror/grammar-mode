@@ -46,11 +46,12 @@ function parseWithSuper(base, input) {
 }
 
 function run(ast) {
-  let graphs = buildGraph(ast, {token, simplify})
+  let options = {token, simplify, esModule, names}
+  let graphs = buildGraph(ast, options)
   if (outputGraph)
     return `digraph{\n${Object.keys(graphs).map(k => graphs[k].toString()).join("")}}\n`
   else
-    return compile(graphs, {esModule, names})
+    return compile(graphs, options)
 }
 
 function out(string) {
