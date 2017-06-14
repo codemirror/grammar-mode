@@ -91,7 +91,7 @@ module.exports = function(graphs, options = {}) {
   }
   code += `${exp}nodes = ${options.names ? "{" : "["}\n  ${nodes.join(",\n  ")}\n${options.names ? "}" : "]"}\n`
   code += `${exp}start = ${getName("_start")}\n`
-  if (options.tokens !== false)
+  if (options.token !== false)
     code += `${exp}token = ${getName("_token")}\n`
 
   return code

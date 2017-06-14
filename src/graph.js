@@ -10,7 +10,7 @@ exports.buildGraph = function(grammar, options) {
   startGraph.copy(0, 0, cx.evalCall(start, []))
   let startGraphs = ["_start"]
 
-  if (options.tokens !== false) {
+  if (options.token !== false) {
     let tokenGraph = cx.registerGraph("_token", new SubGraph)
     for (let i = 0; i < tokens.length; i++)
       tokenGraph.copy(0, null, cx.evalCall(tokens[i], []))
@@ -211,7 +211,7 @@ class Context {
     return rule.getInstance(this, args)
   }
 
-  evalExpr(expr, continued) {
+  evalExpr(expr) {
     let t = expr.type
     if (t == "CharacterRange") {
       return SubGraph.simple(new RangeMatch(expr.from, expr.to))
@@ -224,7 +224,7 @@ class Context {
     } else if (t == "RuleIdentifier") {
       return this.evalCall(expr.id.name, expr.arguments)
     } else if (t == "RepeatedMatch") {
-      return this.evalRepeat(expr.expr, expr.kind, continued)
+      return this.evalRepeat(expr.expr, expr.kind)
     } else if (t == "SequenceMatch") {
       return this.evalSequence(expr.exprs)
     } else if (t == "ChoiceMatch") {
@@ -255,9 +255,9 @@ class Context {
       return SubGraph.simple(nullMatch, new Call(graph, graph.context))
   }
 
-  evalRepeat(expr, kind, continued) {
+  evalRepeat(expr, kind) {
     let inner = this.evalExpr(expr), simple
-    if ((continued || kind == "+") && (simple = inner.simple) && !simple.isolated)
+    if ((simple = inner.simple) && !simple.isolated)
       return SubGraph.simple(new RepeatMatch(simple, kind))
     let graph = new SubGraph
     if (kind == "*") {
@@ -266,7 +266,7 @@ class Context {
     } else if (kind == "+") {
       let next = graph.node()
       graph.copy(0, next, inner)
-      graph.copy(next, 0, inner)
+      graph.copy(next, next, inner)
       graph.edge(next, null, nullMatch)
     } else if (kind == "?") {
       graph.copy(0, null, inner)
@@ -278,7 +278,7 @@ class Context {
   evalSequence(exprs) {
     let graph = new SubGraph, edge = graph.edge(0, null, nullMatch)
     for (let i = 0; i < exprs.length; i++) {
-      let next = this.evalExpr(exprs[i], edge && !edge.effect && !edge.match.isolated)
+      let next = this.evalExpr(exprs[i])
       let firstEdge, copyFrom = 0
       if (edge && (firstEdge = next.singleEdgeFrom(0)) && !firstEdge.effect && edge.canCombine(firstEdge)) {
         edge.match = SeqMatch.create(edge.match, firstEdge.match)
@@ -312,7 +312,10 @@ class Context {
         }
         graph.edge(0, null, simple)
       } else {
-        graph.copy(0, null, curGraph)
+        let start = 0
+        if (curGraph.countReferences(0) > 0)
+          graph.edge(0, start = graph.node(), nullMatch)
+        graph.copy(start, null, curGraph)
       }
     }
     return graph
