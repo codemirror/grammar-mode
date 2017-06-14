@@ -1,6 +1,8 @@
 // FIXME profile this, to see how it compares to old-style modes and
 // to identify bottlenecks
 
+const verbose = false
+
 class Context {
   constructor(name, tokenType, depth, parent, stream) {
     this.name = name
@@ -17,14 +19,12 @@ const MAX_LOOKAHEAD_LINES = 2
 class MatchContext {
   constructor() {
     this.stream = null
-    this.state = null
     this.line = 0
     this.string = ""
   }
 
-  start(stream, state) {
+  start(stream) {
     this.stream = stream
-    this.state = state
     this.line = 0
     this.string = stream ? stream.string.slice(stream.start) : "\n"
     return this
@@ -89,6 +89,7 @@ let stateClass = (graph, options) => class {
       }
 
       if (matched < 0 && maxSkip > 0 && i == edges.length - 1) {
+        if (verbose && maxSkip) console["log"]("Dead end at", mcx.string.slice(pos), node, this.stack.join())
         maxSkip--
         matched = pos
       }
@@ -127,6 +128,7 @@ let stateClass = (graph, options) => class {
   forward(mcx) {
     let progress = this.runMaybe(mcx, 0, 2)
     if (progress < 0) {
+      if (verbose) console["log"]("Lost it at", mcx.string, this.stack.join())
       this.stack.push(graph.token)
       progress = this.runMaybe(mcx, 0, 0)
     }
@@ -182,9 +184,30 @@ let stateClass = (graph, options) => class {
     } else if (op === 6) { // OP_NEG_LOOKAHEAD, expr
       return this.lookahead(mcx, pos, expr[1]) ? -1 : pos
     } else if (op === 7) { // OP_PREDICATE, name
-      return options.predicates[expr[1]](mcx.string, pos, mcx.state.context) ? pos : -1
+      return options.predicates[expr[1]](mcx.string, pos, this.context) ? pos : -1
     } else {
       throw new Error("Unknown match type " + expr)
+    }
+  }
+
+  contextAt(line, linePos) {
+    let copy = this.copy(), mcx = new MatchContext, pos = 0, lastCx = this.context
+    mcx.string = line + "\n"
+    for (;;) {
+      let matched = copy.runMaybe(mcx, pos, 0)
+      if (matched == -1) return copy.context
+      if (matched > linePos) {
+        let context = copy.context
+        if (pos == linePos) {
+          trim: while (context) {
+            for (let prev = lastCx; prev; prev = prev.parent) if (prev === context) break trim
+            context = context.parent
+          }
+        }
+        return context
+      }
+      pos = matched
+      lastCx = copy.context
     }
   }
 
@@ -209,16 +232,16 @@ CodeMirror.GrammarMode = class GrammarMode {
   copyState(state) { return state.copy() }
 
   token(stream, state) {
-    stream.pos += state.forward(this.mcx.start(stream, state))
+    stream.pos += state.forward(this.mcx.start(stream))
     let tokenType = tokenValue
     for (let cx = state.context; cx; cx = cx.parent)
       if (cx.tokenType) tokenType = cx.tokenType + (tokenType ? " " + tokenType : "")
     if (stream.eol())
-      state.forward(this.mcx.start(null, state))
+      state.forward(this.mcx.start(null))
     return tokenType
   }
 
   blankLine(state) {
-    state.forward(this.mcx.start(null, state))
+    state.forward(this.mcx.start(null))
   }
 }
