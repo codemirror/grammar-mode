@@ -117,39 +117,4 @@ function forEachExpr(expr, f) {
   else if (expr.type == "RuleIdentifier")
     for (let i = 0; i < expr.arguments.length; i++) forEachExpr(expr.arguments[i], f)
 }
-
-
-
-/* FIXME Delay this until scopes are easier to access
-exports.canBeNull = function(expr, rules, args) {
-  if (expr.type == "RepeatedMatch") {
-    return expr.kind == "+" ? canBeNull(expr.expr, rules) : true
-  } else if (expr.type == "LookaheadMatch" || expr.type == "Label" || expr.type == "PredicateMatch") {
-    return true
-  } else if (expr.type == "SequenceMatch") {
-    for (let i = 0; i < expr.exprs.length; i++)
-      if (!canBeNull(expr.exprs[i], rules)) return false
-    return true
-  } else if (expr.type == "ChoiceMatch") {
-    for (let i = 0; i < expr.exprs.length; i++)
-      if (canBeNull(expr.exprs[i], rules)) return true
-    return false
-  } else if (expr.type == "RuleIdentifier") {
-    if
-    return rules[expr.id.name].canBeNull(rules)
-  } else {
-    return false
-  }
-}
-
-function checkExpr(expr, rules) {
-  forEachExpr(expr, expr => {
-    if (expr.type == "RepeatMatch" && expr.kind != "?" && canBeNull(expr.expr, rules))
-      throw new Error(`Expressions that don't make progress (can match the empty string) can't have '${expr.kind}' applied to them`)
-    else if (expr.type == "RuleIdentifier" && !(expr.id.name in rules))
-      throw new Error(`Reference to undefined rule '${expr.id.name}'`)
-    else if (expr.type == "SuperMatch")
-      throw new Error("'super' in invalid position")
-  })
-}
-*/
+exports.forEachExpr = forEachExpr

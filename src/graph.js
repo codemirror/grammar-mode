@@ -1,9 +1,10 @@
 const {nullMatch, anyMatch, dotMatch, StringMatch, RangeMatch, SeqMatch,
        ChoiceMatch, RepeatMatch, LookaheadMatch, PredicateMatch} = require("./matchexpr")
-const {normalizeExpr, eqExprs, instantiateArgs} = require("./ast")
+const {normalizeExpr, eqExprs, instantiateArgs, forEachExpr} = require("./ast")
 
 exports.buildGraph = function(grammar, options) {
   let {rules, start, tokens} = gatherRules(grammar)
+  countReferences(rules, start, tokens)
   let cx = new Context(rules, Object.create(null))
   let startGraph = cx.registerGraph("_start", new SubGraph)
   // FIXME guard against infinite loops
@@ -62,32 +63,32 @@ class Rule {
     this.params = params
     this.context = context
     this.instances = []
+    this.recursive = null
+    this.refcount = 0
   }
 
   getInstance(cx, args) {
     for (let i = 0; i < this.instances.length; i++) {
       let inst = this.instances[i]
       if (eqExprs(inst.args, args)) {
-        if (inst.graph.recursive !== false)
-          inst.graph.recursive = true
+        if (this.recursive !== false)
+          this.recursive = true
         return inst.graph
       }
     }
-    let graph = cx.registerGraph(this.name, new SubGraph(this.context))
+    let graph = cx.registerGraph(this.name, new SubGraph)
     this.instances.push({args, graph})
     let result = cx.evalExpr(instantiateArgs(this.params, args, this.expr))
     graph.nodes = result.nodes
-    if (graph.recursive === null) graph.recursive = false
+    if (this.recursive === null) this.recursive = false
     return graph
   }
 }
 
 class SubGraph {
-  constructor(context) {
+  constructor() {
     this.name = null
     this.nodes = [[]]
-    this.recursive = null
-    this.context = context
   }
 
   get edgeCount() {
@@ -204,13 +205,6 @@ class Context {
     }
   }
 
-  getRuleGraph(name, args) {
-    let rule = this.rules[name]
-    if (!rule) throw new Error("Undefined rule " + name)
-    if (args.length != rule.params.length) throw new Error("Wrong number of arguments for " + name)
-    return rule.getInstance(this, args)
-  }
-
   evalExpr(expr) {
     let t = expr.type
     if (t == "CharacterRange") {
@@ -246,13 +240,16 @@ class Context {
   }
 
   evalCall(name, args) {
-    let graph = this.getRuleGraph(name, args), simple
-    if (graph.context && graph.context.token && (simple = graph.simple))
-      return SubGraph.simple(simple, new Token(graph.context.token))
-    else if (!graph.recursive && !graph.context && graph.edgeCount <= MAX_INLINE_EDGE_COUNT)
+    let rule = this.rules[name]
+    if (!rule) throw new Error("Undefined rule " + name)
+    if (args.length != rule.params.length) throw new Error("Wrong number of arguments for " + name)
+    let graph = rule.getInstance(this, args), simple
+    if (rule.context && rule.context.token && (simple = graph.simple))
+      return SubGraph.simple(simple, new Token(rule.context.token))
+    else if (!rule.recursive && !rule.context && (rule.refcount == 1 || graph.edgeCount <= MAX_INLINE_EDGE_COUNT))
       return graph
     else
-      return SubGraph.simple(nullMatch, new Call(graph, graph.context))
+      return SubGraph.simple(nullMatch, new Call(graph, rule.context))
   }
 
   evalRepeat(expr, kind) {
@@ -346,6 +343,28 @@ function gatherRules(grammar) {
   }
   gather(grammar)
   return info
+}
+
+function countReferences(rules, start, tokens) {
+  rules[start].refcount++
+  for (let i = 0; i < tokens.length; i++) rules[tokens[i]].refcount++
+
+  function countExpr(weight, params) {
+    return expr => {
+      if (expr.type == "RuleIdentifier") {
+        if (params.indexOf(expr.id.name) == -1)
+          rules[expr.id.name].refcount += weight
+        for (let i = 0; i < expr.arguments.length; i++)
+          forEachExpr(expr.arguments[i], countExpr(2, params))
+        return false
+      }
+    }
+  }
+
+  for (let name in rules) {
+    let rule = rules[name]
+    forEachExpr(rule.expr, countExpr(rule.params.length ? 2 : 1, rule.params))
+  }
 }
 
 function gcGraphs(graphs, startNames) {
