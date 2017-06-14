@@ -109,11 +109,6 @@ function parseExprInner(p) {
   } else if (p.type == tt.dot) {
     p.next()
     return p.finishNode(node, "DotMatch")
-  } else if (p.type == tt.bracketL) {
-    p.next()
-    node.id = p.parseIdent(true)
-    p.expect(tt.bracketR)
-    return p.finishNode(node, "Label")
   } else {
     node.id = p.parseIdent(true)
     node.arguments = []

@@ -125,7 +125,6 @@ let stateClass = (graph, options) => class {
   }
 
   forward(mcx) {
-    let start = this.stack.slice()
     let progress = this.runMaybe(mcx, 0, 2)
     if (progress < 0) {
       this.stack.push(graph.token)
