@@ -262,7 +262,7 @@ class Context {
     } else if (kind == "+") {
       let next = graph.node()
       graph.copy(0, next, inner)
-      graph.copy(next, next, inner)
+      graph.edge(next, 0, nullMatch)
       graph.edge(next, null, nullMatch)
     } else if (kind == "?") {
       graph.copy(0, null, inner)
