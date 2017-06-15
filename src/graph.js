@@ -241,7 +241,6 @@ class Context {
 
   evalCall(name, args) {
     let rule = this.rules[name]
-    if (!rule) throw new Error("Undefined rule " + name)
     if (args.length != rule.params.length) throw new Error("Wrong number of arguments for " + name)
     let graph = rule.getInstance(this, args), simple
     if (rule.context && rule.context.token && (simple = graph.simple))
@@ -346,14 +345,19 @@ function gatherRules(grammar) {
 }
 
 function countReferences(rules, start, tokens) {
-  rules[start].refcount++
-  for (let i = 0; i < tokens.length; i++) rules[tokens[i]].refcount++
+  function count(name, weight) {
+    let rule = rules[name]
+    if (!rule) throw new Error("Undefined rule " + name)
+    rule.refcount += weight
+  }
+  count(start, 1)
+  for (let i = 0; i < tokens.length; i++) count(tokens[i], 1)
 
   function countExpr(weight, params) {
     return expr => {
       if (expr.type == "RuleIdentifier") {
         if (params.indexOf(expr.id.name) == -1)
-          rules[expr.id.name].refcount += weight
+          count(expr.id.name, weight)
         for (let i = 0; i < expr.arguments.length; i++)
           forEachExpr(expr.arguments[i], countExpr(2, params))
         return false
