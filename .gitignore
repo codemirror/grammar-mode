@@ -1,3 +1,4 @@
 .tern-port
 /node_modules
 /dist
+/src/scratch

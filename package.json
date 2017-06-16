@@ -1,14 +1,16 @@
 {
-  "name": "modegrammar",
+  "name": "codemirror-grammar-mode",
   "version": "0.0.1",
-  "description": "Experimental approach to CodeMirror modes",
-  "main": "src/index.js",
+  "description": "Experimental approach to writing CodeMirror modes",
+  "bin": {
+    "grammar-mode": "./src/grammar-mode.js"
+  },
   "scripts": {
     "test": "mocha test/test-*.js"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/marijnh/modegrammar/"
+    "url": "https://github.com/codemirror/grammar-mode/"
   },
   "keywords": [
     "syntax",
@@ -18,8 +20,7 @@
     "mode",
     "grammar",
     "parser",
-    "peg",
-    "packrat"
+    "peg"
   ],
   "author": "Marijn Haverbeke <marijnh@gmail.com>",
   "license": "MIT",
@@ -27,8 +28,6 @@
     "acorn": "^5.0.3"
   },
   "devDependencies": {
-    "codemirror": "^5.25.2",
-    "ist": "^1.0.1",
-    "mocha": "^3.3.0"
+    "codemirror": "^5.25.2"
   }
 }

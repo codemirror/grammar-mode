@@ -3,14 +3,13 @@ const compile = require("./compile")
 const {buildGraph} = require("./graph")
 const path = require("path"), fs = require("fs")
 
-let input = null, outputGraph = false, simplify = true, names = false, token = true, esModule = false, output = null
+let input = null, outputGraph = false, names = false, token = true, esModule = false, output = null
 
 // declare global: process
 for (let i = 2; i < process.argv.length; i++) {
   let arg = process.argv[i]
   if (arg == "--graph") outputGraph = true
   else if (arg == "--no-token") token = false
-  else if (arg == "--no-simplify") simplify = false
   else if (arg == "--es-module") esModule = true
   else if (arg == "--names") names = true
   else if (arg == "--output") output = process.argv[++i]
@@ -21,7 +20,7 @@ for (let i = 2; i < process.argv.length; i++) {
 
 function usage(code) {
   ;(code ? process.stderr : process.stdout).write(
-    "build-mode [file] [--output file] [--es-module] [--no-token] [--graph] [--no-simplify] [--names]\n"
+    "grammar-mode [file] [--output file] [--es-module] [--no-token] [--graph] [--names]\n"
   )
   process.exit(code)
 }
@@ -46,7 +45,7 @@ function parseWithSuper(base, input) {
 }
 
 function run(ast) {
-  let options = {token, simplify, esModule, names}
+  let options = {token, esModule, names}
   let graphs = buildGraph(ast, options)
   if (outputGraph)
     return `digraph{\n${Object.keys(graphs).map(k => graphs[k].toString()).join("")}}\n`
