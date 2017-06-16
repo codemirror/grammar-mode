@@ -1,7 +1,14 @@
 // FIXME profile this, to see how it compares to old-style modes and
 // to identify bottlenecks
 
-const verbose = false
+// FIXME look into 'normalizing' the graph at load time by i.e.
+// precomputing data structures for all edges that can occur through a
+// call, so that evaluating these can be more direct and efficient
+// without blowing up the on-disk representation
+//
+// (maybe even move the whole grammar compilation to load time?)
+
+const verbose = 0
 
 class Context {
   constructor(name, tokenType, depth, parent, stream) {
@@ -89,11 +96,13 @@ let stateClass = (graph, options) => class {
       }
 
       if (matched < 0 && maxSkip > 0 && i == edges.length - 1) {
-        if (verbose && maxSkip) console["log"]("Dead end at", mcx.string.slice(pos), node, this.stack.join())
+        if (maxSkip && verbose > 0) console["log"]("Dead end at", mcx.string.slice(pos), node, this.stack.join())
         maxSkip--
         matched = pos
       }
       if (matched > pos) {
+        if (verbose > 1)
+          console["log"]("Token", JSON.stringify(mcx.string.slice(pos, matched)), "from", node, "to", to)
         this.stack.pop()
         while (this.context && this.context.depth > this.stack.length)
           this.context = this.context.parent
@@ -128,7 +137,7 @@ let stateClass = (graph, options) => class {
   forward(mcx) {
     let progress = this.runMaybe(mcx, 0, 2)
     if (progress < 0) {
-      if (verbose) console["log"]("Lost it at", mcx.string, this.stack.join())
+      if (verbose > 0) console["log"]("Lost it at", mcx.string, this.stack.join())
       this.stack.push(graph.token)
       progress = this.runMaybe(mcx, 0, 0)
     }
