@@ -6,9 +6,9 @@ exports.buildGraph = function(grammar, options) {
   let {rules, start, tokens} = gatherRules(grammar)
   countReferences(rules, start, tokens)
   let cx = new Context(rules, Object.create(null))
-  let startGraph = cx.registerGraph("_start", new SubGraph)
-  // FIXME guard against infinite loops
-  startGraph.copy(0, 0, cx.evalCall(start, []))
+  let startGraph = cx.registerGraph("_start", new SubGraph), after = startGraph.node()
+  startGraph.copy(0, after, cx.evalCall(start, []))
+  startGraph.edge(after, 0, anyMatch)
   let startGraphs = ["_start"]
 
   if (options.token !== false) {
@@ -251,6 +251,7 @@ class Context {
       return SubGraph.simple(nullMatch, new Call(graph, rule.context))
   }
 
+  // FIXME there's still a bug here that showed up when doing listOf(x? y)
   evalRepeat(expr, kind) {
     let inner = this.evalExpr(expr), simple
     if ((simple = inner.simple) && !simple.isolated)
