@@ -187,7 +187,7 @@ class SubGraph {
 SubGraph.any = SubGraph.simple(anyMatch)
 SubGraph.dot = SubGraph.simple(dotMatch)
 
-const MAX_INLINE_EDGE_COUNT = 5
+const MAX_INLINE_BLOWUP = 20
 
 class Context {
   constructor(rules, graphs) {
@@ -245,7 +245,7 @@ class Context {
     let graph = rule.getInstance(this, args), simple
     if (rule.context && rule.context.token && (simple = graph.simple))
       return SubGraph.simple(simple, new Token(rule.context.token))
-    else if (!rule.recursive && !rule.context && (rule.refcount == 1 || graph.edgeCount <= MAX_INLINE_EDGE_COUNT))
+    else if (!rule.recursive && !rule.context && (rule.refcount == 1 || rule.refcount * graph.edgeCount <= MAX_INLINE_BLOWUP))
       return graph
     else
       return SubGraph.simple(nullMatch, new Call(graph, rule.context))
