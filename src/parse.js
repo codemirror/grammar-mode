@@ -52,6 +52,9 @@ function parseRule(p, rules, isToken, skip) {
   node.context = p.eatContextual("context")
   node.start = p.eatContextual("start")
   node.id = p.parseIdent(true)
+  if (node.id.name in rules)
+    p.raise(node.id.start, `Duplicate rule declaration '${node.id.name}'`)
+  rules[node.id.name] = node
   node.params = []
   if (p.eat(tt.parenL)) while (!p.eat(tt.parenR)) {
     if (node.params.length) p.expect(tt.comma)
@@ -59,18 +62,17 @@ function parseRule(p, rules, isToken, skip) {
   }
   if (isToken && node.params.length > 0)
     p.raise(node.params[0].start, "Token rules must not take parameters")
-  if (node.id.name in rules)
-    p.raise(node.id.start, `Duplicate rule declaration '${node.id.name}'`)
-  rules[node.id.name] = node
-  p.expect(tt.braceL)
-  node.expr = parseExprChoice(p)
-  p.expect(tt.braceR)
-  node.tokenType = null
-  if (!node.context && p.eat(tt.eq)) {
+  if (p.eat(tt.eq)) {
     if (p.type != tt.string) p.unexpected()
     node.tokenType = p.value
     p.next()
+    node.context = true
+  } else {
+    node.tokenType = null
   }
+  p.expect(tt.braceL)
+  node.expr = parseExprChoice(p)
+  p.expect(tt.braceR)
   return p.finishNode(node, "RuleDeclaration")
 }
 
