@@ -56,35 +56,40 @@ class MatchContext {
 
 let tokenValue = null
 
-class Call {
-  constructor(returnTo, context, inner) {
-    this.returnTo = returnTo
-    this.context = context
-    this.inner = inner
-  }
-}
-
 let stateClass = (graph, options) => class {
   constructor(stack, context) {
     this.stack = stack
     this.context = context
   }
 
-  matchNode(mcx, pos, node, calling, maxSkip) {
-    let edges = graph.nodes[node]
+  matchNext(mcx, pos, maxSkip, top) {
+    let depth = this.stack.length - 1, node = this.stack[depth], edges = graph.nodes[node]
+    
     for (let i = 0; i < edges.length; i++) {
       let op = edges[i], matched, to // See compileEdge in compile.js
       if (op === 0) { // Null match
         matched = pos
         to = edges[++i]
-      } else if (op === 1 || op === 2) { // 1, callTarget, returnTo
-        let target = edges[++i]          // 2, callTarget, returnTo, context
-        to = edges[++i]
-        let context = op === 2 ? edges[++i] : null
-        let inner = this.matchNode(mcx, pos, target, new Call(to, context, calling), 0)
-        if (inner < 0) continue
+      } else if (op === 1 || op === 2) {   // 1, callTarget, returnTo
+        let target = edges[++i]            // 2, callTarget, returnTo, context
+        let returnTo = edges[++i]
+        this.go(returnTo)
+        let oldContext = this.context
+        if (op === 2) {
+          let cx = edges[++i]
+          this.context = new Context(cx.name, cx.token, this.stack.length, this.context, mcx.stream)
+        }
+        this.stack.push(target)
+        let inner = this.matchNext(mcx, pos, 0, false)
+        if (inner < 0) { // Reset state when the call fails
+          this.stack.length = depth + 1
+          this.stack[depth] = node
+          this.context = oldContext
+          continue
+        }
         if (inner > pos) return inner
         matched = pos
+        to = returnTo
       } else if (op === 3) { // 3, tokenType, matchExpr, nextNode
         let token = edges[++i]
         matched = this.matchExpr(edges[++i], mcx, pos)
@@ -95,43 +100,42 @@ let stateClass = (graph, options) => class {
         to = edges[++i]
       }
 
-      if (matched < 0 && maxSkip > 0 && i == edges.length - 1) {
-        if (maxSkip && verbose > 0) console["log"]("Dead end at", mcx.string.slice(pos), node, this.stack.join())
-        maxSkip--
-        matched = pos
+      if (matched < 0) {
+        if (maxSkip > 0 && i == edges.length - 1) {
+          if (verbose > 0) console["log"]("Dead end at", mcx.string.slice(pos), node, this.stack.join())
+          maxSkip--
+          matched = pos
+        } else {
+          continue
+        }
       }
+      this.go(to)
+      if (!top && to === -1) return matched
+
       if (matched > pos) {
         if (verbose > 1)
           console["log"]("Token", JSON.stringify(mcx.string.slice(pos, matched)), "from", node, "to", to, "under", this.stack.join())
-        this.stack.pop()
-        while (this.context && this.context.depth > this.stack.length)
-          this.context = this.context.parent
-        this.applyCalls(calling, mcx)
-        if (to !== -1) this.stack.push(to)
         return matched
-      } else if (matched === pos) {
-        if (to === -1) {
-          if (calling) return pos
-          this.stack.pop()
-          to = this.stack[this.stack.length - 1]
-        }
-        let inner = this.matchNode(mcx, pos, to, calling, i == edges.length - 1 ? maxSkip : 0)
-        if (inner > -1) return inner
+      } else {
+        matched = this.matchNext(mcx, pos, i == edges.length - 1 ? maxSkip : 0, top)
+        if (matched >= 0) return matched
+        this.stack.length = depth + 1
+        this.stack[depth] = node
       }
     }
     return -1
   }
 
-  applyCalls(call, mcx) {
-    if (!call) return
-    this.applyCalls(call.inner, mcx)
-    if (call.returnTo !== -1) this.stack.push(call.returnTo)
-    if (call.context) this.context = new Context(call.context.name, call.context.token, this.stack.length, this.context, mcx.stream)
+  go(to) {
+    this.stack.pop()
+    while (this.context && this.context.depth > this.stack.length)
+      this.context = this.context.parent
+    if (to !== -1) this.stack.push(to)
   }
 
   runMaybe(mcx, pos, maxSkip) {
     tokenValue = null
-    return this.matchNode(mcx, pos, this.stack[this.stack.length - 1], null, maxSkip)
+    return this.matchNext(mcx, pos, maxSkip, true)
   }
 
   forward(mcx) {
@@ -194,7 +198,7 @@ let stateClass = (graph, options) => class {
       return this.lookahead(mcx, pos, expr[1]) ? -1 : pos
     } else if (op === 7) { // OP_PREDICATE, name
       let stream = mcx.stream
-      return options.predicates[expr[1]](stream ? stream.string : "\n", pos + (stream ? stream.start : 0), this.context) ? pos : -1
+      return options.predicates[expr[1]](stream ? stream.string : mcx.string, pos + (stream ? stream.start : 0), this.context) ? pos : -1
     } else {
       throw new Error("Unknown match type " + expr)
     }
