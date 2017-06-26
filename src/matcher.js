@@ -102,7 +102,7 @@ let stateClass = (graph, options) => class {
       }
       if (matched > pos) {
         if (verbose > 1)
-          console["log"]("Token", JSON.stringify(mcx.string.slice(pos, matched)), "from", node, "to", to)
+          console["log"]("Token", JSON.stringify(mcx.string.slice(pos, matched)), "from", node, "to", to, "under", this.stack.join())
         this.stack.pop()
         while (this.context && this.context.depth > this.stack.length)
           this.context = this.context.parent
@@ -115,7 +115,7 @@ let stateClass = (graph, options) => class {
           this.stack.pop()
           to = this.stack[this.stack.length - 1]
         }
-        let inner = this.matchNode(mcx, pos, to, calling, 0)
+        let inner = this.matchNode(mcx, pos, to, calling, i == edges.length - 1 ? maxSkip : 0)
         if (inner > -1) return inner
       }
     }
@@ -193,7 +193,8 @@ let stateClass = (graph, options) => class {
     } else if (op === 6) { // OP_NEG_LOOKAHEAD, expr
       return this.lookahead(mcx, pos, expr[1]) ? -1 : pos
     } else if (op === 7) { // OP_PREDICATE, name
-      return options.predicates[expr[1]](mcx.string, pos, this.context) ? pos : -1
+      let stream = mcx.stream
+      return options.predicates[expr[1]](stream ? stream.string : "\n", pos + (stream ? stream.start : 0), this.context) ? pos : -1
     } else {
       throw new Error("Unknown match type " + expr)
     }
