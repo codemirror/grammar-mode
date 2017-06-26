@@ -45,6 +45,8 @@ class StringMatch extends MatchExpr {
 
   toRegexp() { return escRe(this.string) }
 
+  get regexpPrec() { return this.string.length == 1 ? super.regexpPrec : 2 }
+
   toExpr() { return JSON.stringify(this.string) }
 }
 exports.StringMatch = StringMatch
