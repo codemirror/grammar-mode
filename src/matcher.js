@@ -138,12 +138,12 @@ let stateClass = (graph, options) => class {
     return this.matchNext(mcx, pos, maxSkip, true)
   }
 
-  forward(mcx) {
-    let progress = this.runMaybe(mcx, 0, 2)
+  forward(mcx, pos) {
+    let progress = this.runMaybe(mcx, pos, 2)
     if (progress < 0) {
       if (verbose > 0) console["log"]("Lost it at", mcx.string, this.stack.join())
       this.stack.push(graph.token)
-      progress = this.runMaybe(mcx, 0, 0)
+      progress = this.runMaybe(mcx, pos, 0)
     }
     return progress
   }
@@ -246,16 +246,16 @@ CodeMirror.GrammarMode = class GrammarMode {
   copyState(state) { return state.copy() }
 
   token(stream, state) {
-    stream.pos += state.forward(this.mcx.start(stream))
+    stream.pos += state.forward(this.mcx.start(stream), 0)
     let tokenType = tokenValue
     for (let cx = state.context; cx; cx = cx.parent)
       if (cx.tokenType) tokenType = cx.tokenType + (tokenType ? " " + tokenType : "")
     if (stream.eol())
-      state.forward(this.mcx.start(null))
+      state.forward(this.mcx, stream.pos - stream.start)
     return tokenType
   }
 
   blankLine(state) {
-    state.forward(this.mcx.start(null))
+    state.forward(this.mcx.start(null), 0)
   }
 }
