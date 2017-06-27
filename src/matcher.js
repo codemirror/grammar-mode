@@ -81,15 +81,14 @@ let stateClass = (graph, options) => class {
         }
         this.stack.push(target)
         let inner = this.matchNext(mcx, pos, 0, false)
+        if (inner === pos) inner = this.matchNext(mcx, pos, 0, top)
         if (inner < 0) { // Reset state when the call fails
           this.stack.length = depth + 1
           this.stack[depth] = node
           this.context = oldContext
           continue
         }
-        if (inner > pos) return inner
-        matched = pos
-        to = returnTo
+        return inner
       } else if (op === 3) { // 3, tokenType, matchExpr, nextNode
         let token = edges[++i]
         matched = this.matchExpr(edges[++i], mcx, pos)
@@ -110,7 +109,7 @@ let stateClass = (graph, options) => class {
         }
       }
       this.go(to)
-      if (!top && to === -1) return matched
+      if (!top && to === -1 || this.stack.length === 0) return matched
 
       if (matched > pos) {
         if (verbose > 1)
@@ -141,7 +140,7 @@ let stateClass = (graph, options) => class {
   forward(mcx, pos) {
     let progress = this.runMaybe(mcx, pos, 2)
     if (progress < 0) {
-      if (verbose > 0) console["log"]("Lost it at", mcx.string, this.stack.join())
+      if (verbose > 0) console["log"]("Lost it at", mcx.string.slice(pos), this.stack.join())
       this.stack.push(graph.token)
       progress = this.runMaybe(mcx, pos, 0)
     }
