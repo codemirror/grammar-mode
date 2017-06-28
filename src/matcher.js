@@ -81,7 +81,7 @@ let stateClass = (graph, options) => class {
         }
         this.stack.push(target)
         let inner = this.matchNext(mcx, pos, 0, false)
-        if (inner === pos) inner = this.matchNext(mcx, pos, 0, top)
+        if (inner === pos) inner = this.matchNext(mcx, pos, i == edges.length - 1 ? maxSkip : 0, top)
         if (inner < 0) { // Reset state when the call fails
           this.stack.length = depth + 1
           this.stack[depth] = node
