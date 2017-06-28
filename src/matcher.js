@@ -148,12 +148,13 @@ let stateClass = (graph, options) => class {
   }
 
   lookahead(mcx, pos, start) {
+    let oldTokenValue = tokenValue
     let state = new this.constructor([start], null)
     for (;;) {
-      // FIXME implement custom scanning algorithm
+      // FIXME implement custom scanning algorithm. This one breaks when a sub-match fails
       let newPos = state.runMaybe(mcx, pos, 0)
-      if (newPos < 0) return false
-      if (state.stack.length === 0) return true
+      if (newPos < 0) { tokenValue = oldTokenValue; return false }
+      if (state.stack.length === 0) { tokenValue = oldTokenValue; return true }
       pos = newPos
     }
   }
