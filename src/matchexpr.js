@@ -7,7 +7,7 @@ function escRe(str) {
 }
 
 function toSubRegexp(expr, wrapExpr) {
-  if (expr.regexpPrec <= wrapExpr.regexpPrec) return `(?:${expr.toRegexp()})`
+  if (expr.regexpPrec < wrapExpr.regexpPrec) return `(?:${expr.toRegexp()})`
   else return expr.toRegexp()
 }
 
@@ -151,24 +151,18 @@ class ChoiceMatch extends MatchExpr {
 
   eq(other) { return other instanceof ChoiceMatch && eqArray(other.matches, this.matches) }
 
-  get regexpPrec() { return 1 }
+  get regexpPrec() { return this.isSet() ? 4 : 1 }
+
+  isSet() {
+    return this.matches.every(m => m instanceof StringMatch && m.string.length == 1 || m instanceof RangeMatch)
+  }
 
   // FIXME reduce to \d, \w when appropriate
   toRegexp() {
-    let set = ""
-    for (let i = 0; i < this.matches.length; i++) {
-      let match = this.matches[i]
-      if (match instanceof StringMatch && match.string.length == 1) {
-        set += escRe(match.string)
-      } else if (match instanceof RangeMatch) {
-        set += escRe(match.from) + "-" + escRe(match.to)
-      } else {
-        set = null
-        break
-      }
-    }
-    if (set != null) return "[" + set + "]"
-    return this.matches.map(m => toSubRegexp(m, this)).join("|")
+    if (this.isSet())
+      return `[${this.matches.map(m => m instanceof StringMatch ? escRe(m.string) : escRe(m.from) + "-" + escRe(m.to)).join("")}]`
+    else
+      return this.matches.map(m => toSubRegexp(m, this)).join("|")
   }
 
   toExpr(getName) {
