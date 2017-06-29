@@ -5,6 +5,7 @@
   "bin": {
     "grammar-mode": "./src/grammar-mode.js"
   },
+  "main": "src/matcher.js",
   "scripts": {
     "test": "mocha test/test-*.js"
   },
