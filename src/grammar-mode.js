@@ -36,12 +36,15 @@ if (input) {
   process.stdin.on("end", () => out(run(parseWithSuper(process.cwd(), buffer, null))))
 }
 
-
 function parseWithSuper(base, input, fileName) {
   let ast = parse(input, fileName)
   if (ast.extends) {
     let file = path.resolve(base, ast.extends)
     ast.super = parseWithSuper(path.dirname(file), fs.readFileSync(file, "utf8"), file)
+  }
+  for (let i = 0; i < ast.included.length; i++) {
+    let file = path.resolve(base, ast.included[i].value)
+    ast.included[i].ast = parseWithSuper(path.dirname(file), fs.readFileSync(file, "utf8"), file)
   }
   return ast
 }

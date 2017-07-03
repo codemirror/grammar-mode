@@ -321,7 +321,7 @@ class Context {
 
 function gatherRules(grammar) {
   let info = {rules: Object.create(null), start: null, tokens: []}
-  function gather(grammar) {
+  function gather(grammar, prefix) {
     let explicitStart = null
     for (let name in grammar.rules) {
       let ast = grammar.rules[name]
@@ -329,19 +329,24 @@ function gatherRules(grammar) {
         if (explicitStart) throw new Error("Multiple start rules")
         explicitStart = name
       }
-      if (info.rules[name]) continue
-      let expr = normalizeExpr(ast.expr, name, grammar.super, ast.skip)
-      info.rules[name] = new Rule(name, expr, ast.params.map(n => n.name),
-                                  !ast.context && !ast.tokenType ? null : ast.tokenType ? {name, token: ast.tokenType} : {name})
+      let ruleName = prefix + name
+      if (info.rules[ruleName]) continue
+      let expr = normalizeExpr(ast.expr, name, grammar.super, ast.skip, prefix)
+      info.rules[ruleName] = new Rule(ruleName, expr, ast.params.map(n => n.name),
+                                      !ast.context && !ast.tokenType ? null : ast.tokenType ? {name, token: ast.tokenType} : {name})
     }
-    if (grammar.super) gather(grammar.super)
+    if (grammar.super) gather(grammar.super, prefix)
+    for (let i = 0; i < grammar.included.length; i++) {
+      let inc = grammar.included[i]
+      gather(inc.ast, prefix + inc.id.name + ".")
+    }
     if (explicitStart) info.start = explicitStart
     for (let name in grammar.rules) {
       if (info.start == null) info.start = name
       if (grammar.rules[name].isToken && info.tokens.indexOf(name) == -1) info.tokens.push(name)
     }
   }
-  gather(grammar)
+  gather(grammar, "")
   return info
 }
 

@@ -15,7 +15,7 @@ function noSkipAfter(node) {
 // places, splits string matches with newlines, and collapses nested
 // sequence/choice expressions, so that further passes don't have to
 // worry about those.
-let normalizeExpr = exports.normalizeExpr = function(expr, ruleName, superGrammar, skip) {
+let normalizeExpr = exports.normalizeExpr = function(expr, ruleName, superGrammar, skip, prefix) {
   if (expr.type == "StringMatch" && expr.value > 1 && expr.value.indexOf("\n") > -1) {
     let exprs = []
     expr.value.split(/(?=\n)/).forEach(part => {
@@ -25,17 +25,18 @@ let normalizeExpr = exports.normalizeExpr = function(expr, ruleName, superGramma
     return build("SequenceMatch", expr, {exprs})
   } else if (expr.type == "RuleIdentifier") {
     for (let i = 0; i < expr.arguments.length; i++)
-      expr.arguments[i] = normalizeExpr(expr.arguments[i], ruleName, superGrammar, skip)
+      expr.arguments[i] = normalizeExpr(expr.arguments[i], ruleName, superGrammar, skip, prefix)
+    if (prefix) expr.id.name = prefix + expr.id.name
   } else if (expr.type == "RepeatedMatch") {
-    let inner = normalizeExpr(expr.expr, ruleName, superGrammar, skip)
+    let inner = normalizeExpr(expr.expr, ruleName, superGrammar, skip, prefix)
     if (skip && expr.kind != "?") inner = build("SequenceMatch", inner, {exprs: [inner, skip]})
     expr.expr = inner
   } else if (expr.type == "LookaheadMatch") {
-    expr.expr = normalizeExpr(expr.expr, ruleName, null, skip)
+    expr.expr = normalizeExpr(expr.expr, ruleName, null, skip, prefix)
   } else if (expr.type == "SequenceMatch") {
     let exprs = []
     for (let i = 0; i < expr.exprs.length; i++) {
-      let next = normalizeExpr(expr.exprs[i], ruleName, superGrammar, skip)
+      let next = normalizeExpr(expr.exprs[i], ruleName, superGrammar, skip, prefix)
       if (next.type == "SequenceMatch") exprs = exprs.concat(next.exprs)
       else exprs.push(next)
       if (skip && i < expr.exprs.length - 1 && !noSkipAfter(next))
@@ -45,7 +46,7 @@ let normalizeExpr = exports.normalizeExpr = function(expr, ruleName, superGramma
   } else if (expr.type == "ChoiceMatch") {
     let exprs = []
     for (let i = 0; i < expr.exprs.length; i++) {
-      let next = normalizeExpr(expr.exprs[i], ruleName, superGrammar, skip)
+      let next = normalizeExpr(expr.exprs[i], ruleName, superGrammar, skip, prefix)
       if (next.type == "ChoiceMatch") exprs = exprs.concat(next.exprs)
       else exprs.push(next)
     }
@@ -53,7 +54,7 @@ let normalizeExpr = exports.normalizeExpr = function(expr, ruleName, superGramma
   } else if (expr.type == "SuperMatch") {
     for (let grammar = superGrammar; grammar; grammar = grammar.super) {
       let rule = grammar.rules[ruleName]
-      if (rule) return normalizeExpr(rule.expr, ruleName, grammar.super, skip)
+      if (rule) return normalizeExpr(rule.expr, ruleName, grammar.super, skip, prefix)
     }
     throw new SyntaxError(`No super rule found for '${ruleName}'`)
   }

@@ -115,8 +115,9 @@ function parseGrammar(input) {
       let inclNode = new Node("IncludeDeclaration", start)
       if (input.type != "string") input.unexpected()
       inclNode.value = input.value
+      input.next()
       if (!input.eat("id", "as")) input.unexpected()
-      inclNode.name = parseIdent(input)
+      inclNode.id = parseIdent(input)
       node.included.push(input.finishNode(inclNode))
     } else {
       break
@@ -206,7 +207,7 @@ function parseExprInner(input) {
   } else if (input.eat(".")) {
     return input.finishNode(node, "DotMatch")
   } else {
-    node.id = parseIdent(input)
+    node.id = parseDottedIdent(input)
     node.arguments = []
     if (input.start == node.id.end && input.eat("(")) while (!input.eat(")")) {
       if (node.arguments.length && !input.eat(",")) input.unexpected()
@@ -267,5 +268,17 @@ function parseIdent(input) {
   if (input.type != "id") input.unexpected()
   let node = input.startNode("Identifier", {name: input.value})
   input.next()
+  return input.finishNode(node)
+}
+
+function parseDottedIdent(input) {
+  if (input.type != "id") input.unexpected()
+  let node = input.startNode("Identifier", {name: input.value})
+  input.next()
+  while (input.start == input.lastEnd && input.eat(".")) {
+    if (input.type != "id") input.unexpected()
+    node.name += "." + input.value
+    input.next()
+  }
   return input.finishNode(node)
 }
