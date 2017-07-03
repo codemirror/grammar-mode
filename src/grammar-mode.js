@@ -28,20 +28,20 @@ function usage(code) {
 }
 
 if (input) {
-  out(run(parseWithSuper(path.dirname(input), fs.readFileSync(input, "utf8"))))
+  out(run(parseWithSuper(path.dirname(input), fs.readFileSync(input, "utf8"), input)))
 } else {
   let buffer = ""
   process.stdin.resume()
   process.stdin.on("data", chunk => buffer += chunk.toString("utf8"))
-  process.stdin.on("end", () => out(run(parseWithSuper(process.cwd(), buffer))))
+  process.stdin.on("end", () => out(run(parseWithSuper(process.cwd(), buffer, null))))
 }
 
 
-function parseWithSuper(base, input) {
-  let ast = parse(input)
+function parseWithSuper(base, input, fileName) {
+  let ast = parse(input, fileName)
   if (ast.extends) {
     let file = path.resolve(base, ast.extends)
-    ast.super = parseWithSuper(path.dirname(file), fs.readFileSync(file, "utf8"))
+    ast.super = parseWithSuper(path.dirname(file), fs.readFileSync(file, "utf8"), file)
   }
   return ast
 }

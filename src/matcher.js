@@ -64,7 +64,7 @@ let stateClass = (graph, options) => class {
 
   matchNext(mcx, pos, maxSkip, top) {
     let depth = this.stack.length - 1, node = this.stack[depth], edges = graph.nodes[node]
-    
+
     for (let i = 0; i < edges.length; i++) {
       let op = edges[i], matched, to // See compileEdge in compile.js
       if (op === 0) { // Null match

@@ -5,14 +5,14 @@ grammar descriptions.
 
 You write a grammar like this:
 
-    skip (' ' | '\t' | '\n')* {
+    skip (" " | "\t" | "\n")* {
       Expr { (num | var | ParenExpr) (op Expr)? }
-      context ParenExpr { '(' Expr ')' }
+      context ParenExpr { "(" Expr ")" }
     }
     tokens {
       num="number" { digit+ }
       var="variable" { letter (letter | digit)* }
-      op { '+' | '-' | '/' | '*' }
+      op { "+" | "-" | "/" | "*" }
     }
     digit { "0"-"9" }
     letter { "a"-"z" | "A"-"Z" }
