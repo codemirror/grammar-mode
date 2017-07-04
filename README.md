@@ -19,7 +19,7 @@ You write a grammar like this:
 
 And then run `grammar-mode` on it to convert it into a JavaScript
 file. This file will export a set of bindings that can be given to the
-accompanying interpreter (in `src/matcher.js`) to create a CodeMirror
+accompanying interpreter (in `src/mode.js`) to create a CodeMirror
 mode.
 
 ## Grammar syntax
@@ -43,7 +43,8 @@ matches the rule.
 
 Each rule contains a match expression, which is built up like this:
 
- - A `"literal string"` matches that exact text.
+ - A `"literal string"` (using JSON string syntax) matches that exact
+   text.
 
  - An underscore matches any character, and a period matches any
    character except newlines.

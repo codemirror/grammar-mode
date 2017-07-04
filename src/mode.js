@@ -1,13 +1,3 @@
-// FIXME profile this, to see how it compares to old-style modes and
-// to identify bottlenecks
-
-// FIXME look into 'normalizing' the graph at load time by i.e.
-// precomputing data structures for all edges that can occur through a
-// call, so that evaluating these can be more direct and efficient
-// without blowing up the on-disk representation
-//
-// (maybe even move the whole grammar compilation to load time?)
-
 const verbose = 0
 
 class Context {
