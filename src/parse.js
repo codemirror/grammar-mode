@@ -47,7 +47,7 @@ class Input {
 
   next() {
     this.lastEnd = this.end
-    let start = this.match(this.end, /^(\s|\/\/.*|\/\*.*?\*\/)*/)
+    let start = this.match(this.end, /^(\s|\/\/.*|\/\*[^]*?\*\/)*/)
     if (start == this.string.length) return this.set("eof", null, start, start)
 
     let next = this.string[start]
