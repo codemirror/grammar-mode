@@ -1,6 +1,6 @@
 {
   "name": "codemirror-grammar-mode",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Experimental approach to writing CodeMirror modes",
   "bin": {
     "grammar-mode": "./src/grammar-mode.js"
@@ -20,8 +20,7 @@
     "codemirror",
     "mode",
     "grammar",
-    "parser",
-    "peg"
+    "parser"
   ],
   "author": "Marijn Haverbeke <marijnh@gmail.com>",
   "license": "MIT",
