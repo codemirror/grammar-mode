@@ -1,5 +1,5 @@
 function escRe(str) {
-  return str.replace(/[^\w ]/g, ch => {
+  return str.replace(/[^\w ¡-￿]/g, ch => {
     if (ch == "\n") return "\\n"
     if (ch == "\t") return "\\t"
     return "\\" + ch
