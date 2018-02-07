@@ -242,9 +242,9 @@ class Context {
   evalCall(name, args) {
     let rule = this.rules[name]
     if (args.length != rule.params.length) throw new Error("Wrong number of arguments for " + name)
-    let graph = rule.getInstance(this, args), simple
-    if (rule.context && rule.context.token && (simple = graph.simple))
-      return SubGraph.simple(simple, new Token(rule.context.token))
+    let graph = rule.getInstance(this, args), simple = graph.simple
+    if (simple)
+      return SubGraph.simple(simple, rule.context && rule.context.token ? new Token(rule.context.token) : null)
     else if (!rule.recursive && !rule.context && (rule.refcount == 1 || rule.refcount * graph.edgeCount <= MAX_INLINE_BLOWUP))
       return graph
     else
