@@ -1,27 +1,53 @@
 var verbose = 0
 
-function Context(name, tokenType, depth, parent, stream) {
+function Context(name, tokenType, depth, parent, line, pos) {
   this.name = name
   this.tokenType = tokenType
   this.depth = depth
   this.parent = parent
-  this.startLine = stream ? stream.string : "\n"
-  this.startPos = stream ? stream.start : 0
+  this.startLine = line
+  this.startPos = pos
 }
 
 var MAX_LOOKAHEAD_LINES = 2
 
 function MatchContext() {
   this.stream = null
-  this.line = 0
-  this.string = ""
+  this.line = this.startPos = 0
+  this.string = this.startLine = ""
+  this.copyInstance = null
 }
 
 MatchContext.prototype.start = function(stream) {
   this.stream = stream
   this.line = 0
-  this.string = stream ? stream.string.slice(stream.start) : "\n"
+  this.string = stream.string.slice(stream.start)
+  this.startLine = stream.string
+  this.startPos = stream.start
   return this
+}
+
+MatchContext.prototype.startLinebreak = function() {
+  this.stream = null
+  this.line = this.startPos = 0
+  this.string = "\n"
+  this.startLine = ""
+  return this
+}
+
+MatchContext.prototype.copy = function() {
+  var copy = this.copyInstance || (this.copyInstance = new MatchContext)
+  copy.stream = this.stream
+  copy.startPos = this.startPos
+  copy.line = this.line
+  copy.startLine = this.startLine
+  copy.string = this.string
+  return copy
+}
+
+MatchContext.prototype.updateStart = function() {
+  this.startLine = !this.stream ? "" : this.line == 0 ? this.stream.string : this.stream.lookAhead(this.line)
+  this.startPos = this.startLine.length - (this.string.length - 1)
 }
 
 MatchContext.prototype.ahead = function(n) {
@@ -63,7 +89,7 @@ var stateClass = function(graph, options) {
         var oldContext = this.context
         if (op === 2) {
           var cx = edges[++i]
-          this.context = new Context(cx.name, cx.token, this.stack.length, this.context, mcx.stream)
+          this.context = new Context(cx.name, cx.token, this.stack.length, this.context, mcx.startLine, mcx.startPos)
         }
         this.stack.push(target)
         var inner = this.matchNext(mcx, pos, 0, false)
@@ -136,7 +162,9 @@ var stateClass = function(graph, options) {
   StateClass.prototype.lookahead = function(mcx, pos, start) {
     var oldTokenValue = tokenValue
     var state = new this.constructor([start], null)
+    mcx = mcx.copy()
     for (;;) {
+      mcx.updateStart()
       // FIXME implement custom scanning algorithm. This one breaks when a sub-match fails
       var newPos = state.runMaybe(mcx, pos, 0)
       if (newPos < 0) { tokenValue = oldTokenValue; return false }
@@ -244,5 +272,5 @@ GrammarMode.prototype.token = function(stream, state) {
 }
 
 GrammarMode.prototype.blankLine = function(state) {
-  state.forward(this.mcx.start(null), 0)
+  state.forward(this.mcx.startLinebreak(), 0)
 }
