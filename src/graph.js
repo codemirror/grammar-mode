@@ -332,7 +332,7 @@ function gatherRules(grammar) {
       let ruleName = prefix + name
       if (info.rules[ruleName]) continue
       let expr = normalizeExpr(ast.expr, name, grammar.super, ast.skip, prefix)
-      info.rules[ruleName] = new Rule(ruleName, expr, ast.params.map(n => n.name),
+      info.rules[ruleName] = new Rule(ruleName, expr, ast.params.map(n => prefix + n.name),
                                       !ast.context && !ast.tokenType ? null : ast.tokenType ? {name: ruleName, token: ast.tokenType}
                                       : {name: ruleName})
     }
