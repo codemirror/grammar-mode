@@ -16,7 +16,7 @@ function noSkipAfter(node) {
 // sequence/choice expressions, so that further passes don't have to
 // worry about those.
 let normalizeExpr = exports.normalizeExpr = function(expr, ruleName, superGrammar, skip, prefix) {
-  if (expr.type == "StringMatch" && expr.value > 1 && expr.value.indexOf("\n") > -1) {
+  if (expr.type == "StringMatch" && expr.value.length > 1 && expr.value.indexOf("\n") > -1) {
     let exprs = []
     expr.value.split(/(?=\n)/).forEach(part => {
       exprs.push(build("StringMatch", expr, {value: "\n"}))
