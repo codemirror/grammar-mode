@@ -18,9 +18,9 @@ function noSkipAfter(node) {
 let normalizeExpr = exports.normalizeExpr = function(expr, ruleName, superGrammar, skip, prefix) {
   if (expr.type == "StringMatch" && expr.value.length > 1 && expr.value.indexOf("\n") > -1) {
     let exprs = []
-    expr.value.split(/(?=\n)/).forEach(part => {
-      exprs.push(build("StringMatch", expr, {value: "\n"}))
-      if (part.length > 1) exprs.push(build("StringMatch", expr, {value: part.slice(1)}))
+    expr.value.split(/\n/).forEach((part, i) => {
+      if (i) exprs.push(build("StringMatch", expr, {value: "\n"}))
+      if (part.length) exprs.push(build("StringMatch", expr, {value: part}))
     })
     return build("SequenceMatch", expr, {exprs})
   } else if (expr.type == "RuleIdentifier") {
