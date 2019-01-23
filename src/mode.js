@@ -9,7 +9,7 @@ function Context(name, tokenType, depth, parent, line, pos) {
   this.startPos = pos
 }
 
-var MAX_LOOKAHEAD_LINES = 2
+var MAX_LOOKAHEAD_LINES = 3
 
 function MatchContext() {
   this.stream = null
