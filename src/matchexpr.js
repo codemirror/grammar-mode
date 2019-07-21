@@ -2,6 +2,7 @@ function escRe(str) {
   return str.replace(/[^\w ¡-￿]/g, ch => {
     if (ch == "\n") return "\\n"
     if (ch == "\t") return "\\t"
+    if (ch == "\r") return "\\r"
     return "\\" + ch
   })
 }
