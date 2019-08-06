@@ -1,6 +1,6 @@
 {
   "name": "codemirror-grammar-mode",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Experimental approach to writing CodeMirror modes",
   "bin": {
     "grammar-mode": "./src/grammar-mode.js"
