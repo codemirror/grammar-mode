@@ -211,8 +211,16 @@ var stateClass = function(graph, options) {
     } else if (op === 6) { // OP_NEG_LOOKAHEAD, expr
       return this.lookahead(mcx, pos, expr[1]) ? -1 : pos
     } else if (op === 7) { // OP_PREDICATE, name
-      var stream = mcx.stream
-      return options.predicates[expr[1]](stream ? stream.string : mcx.string, pos + (stream ? stream.start : 0), this.context) ? pos : -1
+      let lineStart = pos ? mcx.string.lastIndexOf("\n", pos - 1) : -1, line, linePos
+      if (mcx.stream && lineStart < 0) {
+        line = mcx.stream.string
+        linePos = pos + mcx.stream.start
+      } else {
+        let lineEnd = mcx.string.indexOf("\n", pos)
+        line = mcx.string.slice(lineStart + 1, lineEnd < 0 ? mcx.string.length : lineEnd)
+        linePos = pos - (lineStart + 1)
+      }
+      return options.predicates[expr[1]](line, linePos, this.context) ? pos : -1
     } else {
       throw new Error("Unknown match type " + expr)
     }
@@ -221,6 +229,7 @@ var stateClass = function(graph, options) {
   StateClass.prototype.contextAt = function(line, linePos) {
     var copy = this.copy(), mcx = new MatchContext, pos = 0, lastCx = this.context
     mcx.string = line + "\n"
+    mcx.startLine = line
     for (;;) {
       var matched = copy.runMaybe(mcx, pos, 0)
       if (matched == -1) return copy.context
