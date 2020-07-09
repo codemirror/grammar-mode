@@ -220,11 +220,15 @@ var stateClass = function(graph, options) {
         line = mcx.string.slice(lineStart + 1, lineEnd < 0 ? mcx.string.length : lineEnd)
         linePos = pos - (lineStart + 1)
       }
-      return options.predicates[expr[1]](line, linePos, this.context) ? pos : -1
+      return options.predicates[expr[1]](line, linePos, this.context, mcx.stream ? nextLines(mcx.stream) : noNextLines) ? pos : -1
     } else {
       throw new Error("Unknown match type " + expr)
     }
   }
+
+  function noNextLines() { return null }
+
+  function nextLines(stream) { return function(n) { return stream.lookAhead(n) } }
 
   StateClass.prototype.contextAt = function(line, linePos) {
     var copy = this.copy(), mcx = new MatchContext, pos = 0, lastCx = this.context
