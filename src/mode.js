@@ -211,12 +211,12 @@ var stateClass = function(graph, options) {
     } else if (op === 6) { // OP_NEG_LOOKAHEAD, expr
       return this.lookahead(mcx, pos, expr[1]) ? -1 : pos
     } else if (op === 7) { // OP_PREDICATE, name
-      let lineStart = pos ? mcx.string.lastIndexOf("\n", pos - 1) : -1, line, linePos
+      var lineStart = pos ? mcx.string.lastIndexOf("\n", pos - 1) : -1, line, linePos
       if (mcx.stream && lineStart < 0) {
         line = mcx.stream.string
         linePos = pos + mcx.stream.start
       } else {
-        let lineEnd = mcx.string.indexOf("\n", pos)
+        var lineEnd = mcx.string.indexOf("\n", pos)
         line = mcx.string.slice(lineStart + 1, lineEnd < 0 ? mcx.string.length : lineEnd)
         linePos = pos - (lineStart + 1)
       }
